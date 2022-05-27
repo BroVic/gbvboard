@@ -5,10 +5,11 @@
 # Copyright (c) 2022 Victor Ordu
 
 library(shiny)
+library(shinythemes)
 
 fluidPage(
   title = "GBV Dassboard",
-  theme = shinythemes::shinytheme("darkly"),
+  theme = shinytheme("darkly"),
   lang = 'en',
   
   fluidRow(
@@ -33,8 +34,8 @@ fluidPage(
       width = 3,
       inputPanel(
         selectInput("proj", "Project", choices = "NFWP"),
-        selectInput("state", "State", choices = c("Taraba", "Kebbi", "Niger")),
-        selectInput("data", "Data", choices = "FacilitiesBasic", selected = "FacilitiesBasic"),
+        selectInput("state", "State", choices = c("All", "Taraba", "Kebbi", "Niger")),
+        selectInput("dbtbl", "Data", choices = "FacilitiesBasic", selected = "FacilitiesBasic"),
         selectInput("x", "x", choices = ""),
         selectInput('y', 'y', choices = '')
       )
@@ -45,7 +46,9 @@ fluidPage(
       width = 6, 
       wellPanel(
         plotOutput("plot"),
-        checkboxInput("rotate", "Horizontal layout")
+        checkboxInput("rotate", "Horizontal layout"),
+        checkboxInput("switch", "Switch variables"),
+        checkboxInput("order", "Order by frequency")
       )
     ),
     

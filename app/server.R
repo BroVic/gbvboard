@@ -20,6 +20,10 @@ read_from_db <- function(tbl, db = dbfile, ...) {
 }
 
 query_db <- function(qry, db = dbfile, ...) {
+  stopifnot({
+    is.character(qry)
+    file.exists(db)
+  })
   tryCatch({
     con <- dbConnect(SQLite(), db, ...)
     if (!dbIsValid(con))
@@ -32,69 +36,143 @@ query_db <- function(qry, db = dbfile, ...) {
 }
 
 
-apptable <- function(dat, x, y, ...) {
-  # browser()
-  dx <- dat[[x]]
-  if (!shiny::isTruthy(y))
-    return(table(dx, ...))
-  table(dx, dat[[y]], ...)
+.app_table <- function(dat, x, y, ...) {
+  stopifnot(is.data.frame(dat))
+  xcol <- dat[[x]]
+  if (!isTruthy(y))
+    return(table(xcol, ...))
+  table(xcol, dat[[y]], ...)
+}
+
+
+
+var_opts <- function(df) {
+  stopifnot(is.data.frame(df))
+  c("", names(df))
+}
+
+
+
+set_types <- function(dat) {
+  stopifnot(is.data.frame(dat))
+  purrr::map_dfc(dat, function(col) {
+    if (!is.character(col))
+      return(col)
+    if (length(unique(col)) > 10L) {
+        if (all(!naijR::is_lga(col)))  # i.e. none are LGAs
+          return(col)
+      }
+      as.factor(col)
+  })
 }
 
 
 
 
+fetch_data <- function(qry, db) {
+  stopifnot({
+    is.character(qry)
+    file.exists(db)
+  })
+  dbcon <- dbConnect(SQLite(), db)
+  on.exit(dbDisconnect(dbcon))
+  dbGetQuery(dbcon, qry)
+}
+
+
+
+
+# Server function
 function(input, output, session) {
+  
+  .get_class <- function(dt, var)  {
+    stopifnot(is.data.frame(dt))
+    class(getElement(dt, var))
+  }
+  
+  
+  .is_num <- function(dat, var) {
+    cl <- .get_class(dat, var)
+    cl == "numeric" || cl == "integer"
+  }
+  
   dbfile <- here::here("app/www/gbvdata.db")
   
-  df <- reactive({
-    qry <- sprintf("SELECT * FROM %s;", input$data)
+  dt.elem <- reactive({
+    qry <- sprintf("SELECT * FROM %s;", input$dbtbl)
+    df <- fetch_data(qry, dbfile)
     
-    tryCatch({
-      dbcon <- dbConnect(SQLite(), dbfile)
-      df <- dbGetQuery(dbcon, qry)
-      # browser()
-      subset(df, State == input$state)
-    },
-    error = function(e)
-      stop(e),
-    finally = dbDisconnect(dbcon))
+    if (input$state != "All")
+      df <- subset(df, State == input$state, select = -State)
+    
+    set_types(df)
   })
-  
-  vars <- reactive(list(x = input$x, y = input$y))
   
   observe({
-    nms <- c("", names(df()))
-    updateSelectInput(session, "x", "x", nms)
-    updateSelectInput(session, "y", "y", nms)
-  })
-  
-  output$sumtable <- renderTable({
     # browser()
-    if (!isTruthy(vars()$x))
-      return()
-    apptable(df(), vars()$x, vars()$y)
+    nms <- var_opts(dt.elem())
+    updateSelectInput(session, "x", "x", nms)
   })
   
-  output$plot <- renderPlot({
-    browser()
-    if (!isTruthy(vars()$x))
+  observe({
+    nms <- var_opts(isolate(dt.elem()))
+    x.val <- input$x
+    if (isTruthy(x.val)) {
+      less.one <- nms[!(nms %in% x.val)]
+      updateSelectInput(session, "y", "y", less.one)
+    }
+  })
+  
+  #
+  ##### Outputs ####
+  #
+  ## The summary table
+  output$sumtable <- renderTable({
+    if (!isTruthy(input$x))
       return()
+    .app_table(dt.elem(), input$x, input$y)
+  })
+  
+  
+  ## The main chart
+  output$plot <- renderPlot({
+    if (!isTruthy(input$x))
+      return()
+
+    class.x <- .get_class(dt.elem(), input$x)
+    class.y <- NULL
+    y.is.truthy <- isTruthy(input$y)
+    if (y.is.truthy)
+      class.y <- .get_class(dt.elem(), input$y)
     
-    gg.aes <- if (!isTruthy(vars()$y))
-      ggplot(df(), aes_string(vars()$x)) 
-    else
-      ggplot(df(), aes_string(vars()$x, vars()$y))
+    gg.aes <- ggplot(dt.elem(), aes_string(input$x)) 
     
-    gg.bar <- gg.aes + geom_bar(fill = "purple")
+    pp <- if (class.x == "factor") {
+      if (is.null(class.y))
+        gg.aes + geom_bar(fill = "purple")
+      else if (class.y == "factor")
+        gg.aes + geom_bar(aes_string(fill = input$y)) 
+      else if (.is_num(dt.elem(), input$y))
+        gg.aes + geom_boxplot()
+    }
+    else if (.is_num(dt.elem(), input$x)) {
+      if (y.is.truthy && .is_num(dt.elem(), input$y))
+        gg.aes + geom_point(aes_string(y = input$y))
+      else
+        gg.aes + geom_histogram()
+    }
     
     if (input$rotate)
-      gg.bar <- gg.bar + coord_flip()
-    gg.bar
+      pp <- pp + coord_flip()
+    
+    pp
   })
   
+  
+  ## The data table
   output$DT <- renderDataTable({
     if (isFALSE(input$maindata))
       return()
-    df()
+    dt.elem()$df
   })
 }
