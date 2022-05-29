@@ -46,9 +46,12 @@ fluidPage(
       width = 6, 
       wellPanel(
         plotOutput("plot"),
-        checkboxInput("rotate", "Horizontal layout"),
-        checkboxInput("switch", "Switch variables"),
-        checkboxInput("order", "Order by frequency")
+        conditionalPanel(
+          condition = 'output.xvar == "factor"',
+          checkboxInput("rotate", "Horizontal layout"),
+          checkboxInput("switch", "Switch variables"),
+          checkboxInput("order", "Order by frequency")
+        )
       )
     ),
     

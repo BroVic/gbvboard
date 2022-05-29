@@ -9,7 +9,7 @@ library(RSQLite)
 library(ggplot2)
 # library(jGBV)
 
-read_from_db <- function(tbl, db = dbfile, ...) {
+read_from_db <- function(db, tbl, ...) {
   tryCatch({
     con <- dbConnect(SQLite(), db, ...)
     df <- dbReadTable(con, tbl)
@@ -98,7 +98,7 @@ function(input, output, session) {
   
   dbfile <- here::here("app/www/gbvdata.db")
   
-  dt.elem <- reactive({
+  dtInput <- reactive({
     qry <- sprintf("SELECT * FROM %s;", input$dbtbl)
     df <- fetch_data(qry, dbfile)
     
@@ -110,12 +110,12 @@ function(input, output, session) {
   
   observe({
     # browser()
-    nms <- var_opts(dt.elem())
+    nms <- var_opts(dtInput())
     updateSelectInput(session, "x", "x", nms)
   })
   
   observe({
-    nms <- var_opts(isolate(dt.elem()))
+    nms <- var_opts(isolate(dtInput()))
     x.val <- input$x
     if (isTruthy(x.val)) {
       less.one <- nms[!(nms %in% x.val)]
@@ -123,43 +123,44 @@ function(input, output, session) {
     }
   })
   
-  #
-  ##### Outputs ####
-  #
-  ## The summary table
-  output$sumtable <- renderTable({
-    if (!isTruthy(input$x))
+  varclass <- reactiveValues()
+  observe({
+    df <- isolate(dtInput())
+    x <- input$x
+    if (!isTruthy(x))
       return()
-    .app_table(dt.elem(), input$x, input$y)
+    varclass$X <- .get_class(df, x)
+    varclass$Y <- NULL
+    y <- input$y
+    if (isTruthy(y)) 
+      varclass$Y <- .get_class(df, y)
   })
   
-  
+  #
+  ##### Outputs ###
+  #
   ## The main chart
+  #################
   output$plot <- renderPlot({
     if (!isTruthy(input$x))
       return()
-
-    class.x <- .get_class(dt.elem(), input$x)
-    class.y <- NULL
-    y.is.truthy <- isTruthy(input$y)
-    if (y.is.truthy)
-      class.y <- .get_class(dt.elem(), input$y)
     
-    gg.aes <- ggplot(dt.elem(), aes_string(input$x)) 
+    gg.aes <- ggplot(dtInput(), aes_string(input$x)) 
     
-    pp <- if (class.x == "factor") {
-      if (is.null(class.y))
+    pp <- if (varclass$X == "factor") {
+      if (is.null(varclass$Y))
         gg.aes + geom_bar(fill = "purple")
-      else if (class.y == "factor")
-        gg.aes + geom_bar(aes_string(fill = input$y)) 
-      else if (.is_num(dt.elem(), input$y))
+      else if (varclass$Y == "factor")
+        gg.aes + 
+        geom_bar(aes_string(fill = input$y), position = input$position, show.legend = input$legend, orientation = ) 
+      else if (.is_num(dtInput(), input$y))
         gg.aes + geom_boxplot()
     }
-    else if (.is_num(dt.elem(), input$x)) {
-      if (y.is.truthy && .is_num(dt.elem(), input$y))
+    else if (.is_num(dtInput(), input$x)) {
+      if (y.is.truthy && .is_num(dtInput(), input$y))
         gg.aes + geom_point(aes_string(y = input$y))
       else
-        gg.aes + geom_histogram()
+        gg.aes + geom_histogram(binwidth = input$binwidth)
     }
     
     if (input$rotate)
@@ -169,10 +170,27 @@ function(input, output, session) {
   })
   
   
+  output$xvar <- reactive({
+    return(varclass$X)
+  })
+  outputOptions(output, "xvar", suspendWhenHidden = FALSE)
+  
+  ## The summary table
+  ####################
+  output$sumtable <- renderTable({
+    if (!isTruthy(input$x))
+      return()
+    .app_table(dtInput(), input$x, input$y)
+  })
+  
+  
+  
+  
   ## The data table
+  #################
   output$DT <- renderDataTable({
     if (isFALSE(input$maindata))
       return()
-    dt.elem()$df
+    dtInput()$df
   })
 }
