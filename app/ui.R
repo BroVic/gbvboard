@@ -34,10 +34,14 @@ fluidPage(
       width = 3,
       inputPanel(
         selectInput("proj", "Project", choices = "NFWP"),
-        selectInput("state", "State", choices = c("All", "Taraba", "Kebbi", "Niger")),
-        selectInput("dbtbl", "Data", choices = "FacilitiesBasic", selected = "FacilitiesBasic"),
-        selectInput("x", "x", choices = ""),
-        selectInput('y', 'y', choices = '')
+        selectInput("state", "State", choices = opts$allstates),
+        selectInput("dbtbl", "Data", choices = names(dbTables), selected = "Facilities"),
+        wellPanel(
+          selectInput("x", "x", choices = ""),
+          selectInput('y', 'y', choices = ''),
+          actionButton("reset", "Clear"),
+          actionButton("invert", "Invert")
+        )
       )
     ),
     
@@ -49,8 +53,19 @@ fluidPage(
         conditionalPanel(
           condition = 'output.xvar == "factor"',
           checkboxInput("rotate", "Horizontal layout"),
-          checkboxInput("switch", "Switch variables"),
           checkboxInput("order", "Order by frequency")
+        ),
+        conditionalPanel(
+          "output.xvar == 'integer' || output.var == 'numeric'",
+          checkboxGroupInput("log", "Log transform", c("None", "log2", "log10"), "None"),
+          conditionalPanel(
+            "output.yvar == null",
+            sliderInput("bins", "No. of bins", 20, 80, 30)
+          ),
+          conditionalPanel(
+            "output.yvar == 'numeric' || output.yvar == 'integer'",
+            checkboxInput("invert", "Invert axes")
+          )
         )
       )
     ),

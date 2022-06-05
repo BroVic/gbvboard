@@ -10,29 +10,13 @@ library(ggplot2)
 # library(jGBV)
 
 read_from_db <- function(db, tbl, ...) {
-  tryCatch({
-    con <- dbConnect(SQLite(), db, ...)
-    df <- dbReadTable(con, tbl)
-  }, error = function(e) {
-    stop(e)
-  }, finally = dbDisconnect(con))
-  df
-}
-
-query_db <- function(qry, db = dbfile, ...) {
   stopifnot({
-    is.character(qry)
     file.exists(db)
+    is.character(tbl)
   })
-  tryCatch({
-    con <- dbConnect(SQLite(), db, ...)
-    if (!dbIsValid(con))
-      return()
-    df <- dbGetQuery(con, qry)
-  }, error = function(e) {
-    stop(e)
-  }, finally = dbDisconnect(con))
-  df
+  con <- dbConnect(SQLite(), db, ...)
+  on.exit(dbDisconnect(con))
+  dbReadTable(con, tbl)
 }
 
 
@@ -55,15 +39,26 @@ var_opts <- function(df) {
 
 set_types <- function(dat) {
   stopifnot(is.data.frame(dat))
-  purrr::map_dfc(dat, function(col) {
+  ..setType <- function(col) {
     if (!is.character(col))
       return(col)
     if (length(unique(col)) > 10L) {
-        if (all(!naijR::is_lga(col)))  # i.e. none are LGAs
-          return(col)
-      }
-      as.factor(col)
-  })
+      col <- tryCatch({
+        numchars10 <- all(nchar(col)) == 10L
+        if (numchars10)
+          as.Date(col)
+        else
+          as.POSIXct(col)
+      }, error = function(e)
+        col)
+      if (isFALSE(is.character(col)))
+        return(col)
+      if (all(!naijR::is_lga(col))) # i.e. none are LGAs
+        return(col)
+    }
+    as.factor(col)
+  }
+  purrr::map_dfc(dat, ..setType)
 }
 
 
@@ -80,6 +75,49 @@ fetch_data <- function(qry, db) {
 }
 
 
+update_var_control <- function(session, var, ...) {
+  stopifnot(is.character(var))
+  updateSelectInput(session, var, stringr::str_to_title(var), ...)
+}
+
+
+# S4 generic and methods
+# setGeneric("plotMethod", function(x, y, ..., df)
+#   standardGeneric("plotMethod"), signature = c("x", 'y'))
+# 
+# setMethod("plotMethod", c("factor", "factor"), function(x, y, df) {
+#   ggplot(df, aes_string(x)) +
+#     geom_bar(aes_string(fill = y))
+# })
+# 
+# setMethod("plotMethod", "factor", function(x, y = NULL, ..., df) {
+#   ggplot(df, aes_string(x, fill = ...))
+# })
+# 
+# setMethod("plotMethod", "numeric", function(x, y = NULL, ..., df) {
+#   ggplot(df, aes_string(x)) +
+#     geom_histogram()
+# })
+# 
+# setMethod("plotMethod", c("numeric", "numeric"), function(x, y, ..., df) {
+#   ggplot(df, aes_string(x, y)) +
+#     geom_point()
+# })
+# 
+# setMethod("plotMethod", c("factor", "numeric"), function(x, y, ..., df) {
+#   ggplot(df, aes_string(x, y)) +
+#     geom_boxplot()
+# })
+# 
+# 
+# make_plot <- function(data, x.var, y.var) {
+#   xcol <- data[[x.var]]
+#   ycol <- NULL
+#   if (!is.null(y.var))
+#     ycol <- data[[y.var]]
+#   browser()
+#   plotMethod(xcol, ycol, data, x = x.var, y = y.var)
+# }
 
 
 # Server function
@@ -99,19 +137,31 @@ function(input, output, session) {
   dbfile <- here::here("app/www/gbvdata.db")
   
   dtInput <- reactive({
-    qry <- sprintf("SELECT * FROM %s;", input$dbtbl)
+    # browser()
+    tbl <- dbTables[[input$dbtbl]]
+    qry <- sprintf("SELECT * FROM %s;", tbl)
     df <- fetch_data(qry, dbfile)
     
-    if (input$state != "All")
+    if (input$state != opts$allstates)
       df <- subset(df, State == input$state, select = -State)
     
     set_types(df)
   })
   
   observe({
+    project <- input$proj
+    updateSelectInput(
+      session,
+      "state", 
+      "State", 
+      choices = c(opts$allstates, projectStates[[project]])
+    )
+  })
+  
+  observe({
     # browser()
     nms <- var_opts(dtInput())
-    updateSelectInput(session, "x", "x", nms)
+    update_var_control(session, "x", choices = nms)
   })
   
   observe({
@@ -119,9 +169,15 @@ function(input, output, session) {
     x.val <- input$x
     if (isTruthy(x.val)) {
       less.one <- nms[!(nms %in% x.val)]
-      updateSelectInput(session, "y", "y", less.one)
+      update_var_control(session, "y", choices = less.one)
     }
   })
+  
+  observeEvent(input$reset,
+               {
+                 update_var_control(session, "X", choices = character(1))
+                 update_var_control(session, "y", choices = character(1))
+               })
   
   varclass <- reactiveValues()
   observe({
@@ -136,31 +192,44 @@ function(input, output, session) {
       varclass$Y <- .get_class(df, y)
   })
   
+  observeEvent(input$invert, {
+    nms <- var_opts(isolate(dtInput()))
+    upd <- function(var, sel, s = session, c = nms)
+      update_var_control(s, var, choices = c, selected = sel)
+    upd("x", input$y)
+    upd("y", input$x)
+  })
+  
   #
   ##### Outputs ###
   #
   ## The main chart
   #################
   output$plot <- renderPlot({
-    if (!isTruthy(input$x))
+    xvar <- input$x
+    yvar <- input$y
+    df <- dtInput()
+    
+    if (!isTruthy(xvar))
       return()
     
-    gg.aes <- ggplot(dtInput(), aes_string(input$x)) 
-    
+    # pp <- make_plot(df, xvar, yvar)
+    gg.aes <- ggplot(df, aes_string(xvar))
+
     pp <- if (varclass$X == "factor") {
       if (is.null(varclass$Y))
-        gg.aes + geom_bar(fill = "purple")
+        gg.aes + geom_bar(fill = "darkgreen")
       else if (varclass$Y == "factor")
-        gg.aes + 
-        geom_bar(aes_string(fill = input$y), position = input$position, show.legend = input$legend, orientation = ) 
-      else if (.is_num(dtInput(), input$y))
+        gg.aes +
+        geom_bar(aes_string(fill = yvar))
+      else if (.is_num(df, yvar))
         gg.aes + geom_boxplot()
     }
-    else if (.is_num(dtInput(), input$x)) {
-      if (y.is.truthy && .is_num(dtInput(), input$y))
-        gg.aes + geom_point(aes_string(y = input$y))
+    else if (.is_num(df, xvar)) {
+      if (isTruthy(yvar) && .is_num(df, yvar))
+        gg.aes + geom_point(aes_string(y = yvar))
       else
-        gg.aes + geom_histogram(binwidth = input$binwidth)
+        gg.aes + geom_histogram(bins = input$bins)
     }
     
     if (input$rotate)
@@ -171,9 +240,11 @@ function(input, output, session) {
   
   
   output$xvar <- reactive({
-    return(varclass$X)
+    varclass$X
   })
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
+  
+  
   
   ## The summary table
   ####################
@@ -182,7 +253,6 @@ function(input, output, session) {
       return()
     .app_table(dtInput(), input$x, input$y)
   })
-  
   
   
   
