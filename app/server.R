@@ -5,11 +5,11 @@
 # Copyright (c) 2022 Victor Ordu
 
 library(shiny)
-library(RSQLite)
 library(ggplot2)
 # library(jGBV)
 
 read_from_db <- function(db, tbl, ...) {
+  require(RSQLite, quietly = TRUE)
   stopifnot({
     file.exists(db)
     is.character(tbl)
@@ -65,6 +65,7 @@ set_types <- function(dat) {
 
 
 fetch_data <- function(qry, db) {
+  require(RSQLite, quietly = TRUE)
   stopifnot({
     is.character(qry)
     file.exists(db)
@@ -82,8 +83,7 @@ update_var_control <- function(session, var, ...) {
 
 
 # S4 generic and methods
-# setGeneric("plotMethod", function(x, y, ..., df)
-#   standardGeneric("plotMethod"), signature = c("x", 'y'))
+# setGeneric("plotMethod", function(x, y, ..., df) standardGeneric("plotMethod"))
 # 
 # setMethod("plotMethod", c("factor", "factor"), function(x, y, df) {
 #   ggplot(df, aes_string(x)) +
@@ -120,19 +120,23 @@ update_var_control <- function(session, var, ...) {
 # }
 
 
+.get_class <- function(dt, var)  {
+  stopifnot(is.data.frame(dt))
+  class(getElement(dt, var))
+}
+
+
+.is_num <- function(dat, var) {
+  cl <- .get_class(dat, var)
+  cl == "numeric" || cl == "integer"
+}
+
+
+
+
 # Server function
 function(input, output, session) {
   
-  .get_class <- function(dt, var)  {
-    stopifnot(is.data.frame(dt))
-    class(getElement(dt, var))
-  }
-  
-  
-  .is_num <- function(dat, var) {
-    cl <- .get_class(dat, var)
-    cl == "numeric" || cl == "integer"
-  }
   
   dbfile <- here::here("app/www/gbvdata.db")
   
@@ -146,37 +150,45 @@ function(input, output, session) {
       df <- subset(df, State == input$state, select = -State)
     
     set_types(df)
-  })
+  },
+  label = "Data initialization")
   
   observe({
     project <- input$proj
     updateSelectInput(
       session,
-      "state", 
-      "State", 
+      controls$state$id, 
+      controls$state$label, 
       choices = c(opts$allstates, projectStates[[project]])
     )
   })
   
+  xopts <- reactiveVal(0, "X variable options")
   observe({
     # browser()
-    nms <- var_opts(dtInput())
-    update_var_control(session, "x", choices = nms)
+    opts <- var_opts(dtInput())
+    xopts(opts)
+    xval <- isolate(input$x)
+    if (!isTruthy(xval))
+      xval <- NULL
+    update_var_control(session, controls$xvar$id, choices = xopts(), selected = xval)
   })
   
   observe({
-    nms <- var_opts(isolate(dtInput()))
+    # nms <- var_opts(isolate(dtInput()))
+    nms <- xopts()
     x.val <- input$x
     if (isTruthy(x.val)) {
       less.one <- nms[!(nms %in% x.val)]
-      update_var_control(session, "y", choices = less.one)
+      update_var_control(session, controls$yvar$id, choices = less.one)
     }
   })
   
   observeEvent(input$reset,
                {
-                 update_var_control(session, "X", choices = character(1))
-                 update_var_control(session, "y", choices = character(1))
+                 update_var_control(session, controls$xvar$id, choices = character(1))
+                 update_var_control(session, controls$yvar$id, choices = character(1))
+                 updateCheckboxInput(session, controls$horiz$id, controls$horiz$name)
                })
   
   varclass <- reactiveValues()
@@ -193,11 +205,11 @@ function(input, output, session) {
   })
   
   observeEvent(input$invert, {
-    nms <- var_opts(isolate(dtInput()))
-    upd <- function(var, sel, s = session, c = nms)
-      update_var_control(s, var, choices = c, selected = sel)
-    upd("x", input$y)
-    upd("y", input$x)
+    nms <- isolate(xopts())
+    upd <- function(var, sel, ss = session, cc = nms)
+      update_var_control(ss, var, choices = cc, selected = sel)
+    upd(controls$xvar$id, isolate(input$y))
+    upd(controls$yvar$id, isolate(input$x))
   })
   
   #
@@ -241,7 +253,8 @@ function(input, output, session) {
   
   output$xvar <- reactive({
     varclass$X
-  })
+  }, 
+  label = "Conditional panel controls")
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
   
   

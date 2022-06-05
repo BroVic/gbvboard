@@ -8,7 +8,7 @@ library(shiny)
 library(shinythemes)
 
 fluidPage(
-  title = "GBV Dassboard",
+  title = "GBV Dashboard",
   theme = shinytheme("darkly"),
   lang = 'en',
   
@@ -33,14 +33,14 @@ fluidPage(
     column(
       width = 3,
       inputPanel(
-        selectInput("proj", "Project", choices = "NFWP"),
-        selectInput("state", "State", choices = opts$allstates),
-        selectInput("dbtbl", "Data", choices = names(dbTables), selected = "Facilities"),
+        selectInput(controls$project$id, controls$project$label, choices = projectNames[1]),
+        selectInput(controls$state$id, controls$state$label, choices = opts$allstates),
+        selectInput(controls$tables$id, controls$tables$label, choices = names(dbTables), selected = "Facilities"),
         wellPanel(
-          selectInput("x", "x", choices = ""),
-          selectInput('y', 'y', choices = ''),
-          actionButton("reset", "Clear"),
-          actionButton("invert", "Invert")
+          selectInput(controls$xvar$id, controls$xvar$label, choices = ""),
+          selectInput(controls$yvar$id, controls$yvar$label, choices = ''),
+          actionButton(controls$reset$id, controls$reset$label),
+          actionButton(controls$invert$id, controls$invert$label)
         )
       )
     ),
@@ -52,8 +52,8 @@ fluidPage(
         plotOutput("plot"),
         conditionalPanel(
           condition = 'output.xvar == "factor"',
-          checkboxInput("rotate", "Horizontal layout"),
-          checkboxInput("order", "Order by frequency")
+          checkboxInput(controls$horiz$id, controls$horiz$name),
+          checkboxInput(controls$order$id, controls$order$name)
         ),
         conditionalPanel(
           "output.xvar == 'integer' || output.var == 'numeric'",
