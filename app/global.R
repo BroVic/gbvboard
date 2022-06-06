@@ -7,7 +7,8 @@ controls <- list(
   xvar = list(id = "x", label = "x"),
   yvar = list(id = "y", label = "y"),
   horiz = list(id = "rotate", label = "Horizontal layout"),
-  order = list(id = "order", label = "Order by frequency")
+  order = list(id = "order", label = "Order by frequency"),
+  stack = list(id = "stack", label = "Stack bars")
 )
 
 opts <- list(allstates = "All")
@@ -15,7 +16,7 @@ opts <- list(allstates = "All")
 dbTables <- c(Faciities = "FacilitiesBasic")
 projectNames <- c("NFWP")
 projects <- 
-  structure(projectNames, names(paste0("proj", seq_along(projectNames))))
+  structure(projectNames, names = paste0("proj", seq_along(projectNames)))
 projectStates <- list(
   NFWP = c("Taraba", "Kebbi", "Niger")
 )

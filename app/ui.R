@@ -52,8 +52,12 @@ fluidPage(
         plotOutput("plot"),
         conditionalPanel(
           condition = 'output.xvar == "factor"',
-          checkboxInput(controls$horiz$id, controls$horiz$name),
-          checkboxInput(controls$order$id, controls$order$name)
+          checkboxInput(controls$horiz$id, controls$horiz$label),
+          checkboxInput(controls$order$id, controls$order$label),
+          conditionalPanel(
+            "output.yvar == 'factor'",
+            checkboxInput(controls$stack$id, controls$stack$label, value = TRUE)
+          )
         ),
         conditionalPanel(
           "output.xvar == 'integer' || output.var == 'numeric'",
@@ -61,10 +65,6 @@ fluidPage(
           conditionalPanel(
             "output.yvar == null",
             sliderInput("bins", "No. of bins", 20, 80, 30)
-          ),
-          conditionalPanel(
-            "output.yvar == 'numeric' || output.yvar == 'integer'",
-            checkboxInput("invert", "Invert axes")
           )
         )
       )

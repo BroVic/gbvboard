@@ -25,7 +25,10 @@ read_from_db <- function(db, tbl, ...) {
   xcol <- dat[[x]]
   if (!isTruthy(y))
     return(table(xcol, ...))
-  table(xcol, dat[[y]], ...)
+  table(xcol, dat[[y]], ...) |>
+    as.data.frame() |>
+    setNames(c(x, y, "Freq")) |>
+    tidyr::pivot_wider(names_from = dplyr::all_of(y), values_from = "Freq")
 }
 
 
@@ -136,15 +139,10 @@ update_var_control <- function(session, var, ...) {
 
 # Server function
 function(input, output, session) {
-  
-  
-  dbfile <- here::here("app/www/gbvdata.db")
-  
   dtInput <- reactive({
-    # browser()
     tbl <- dbTables[[input$dbtbl]]
     qry <- sprintf("SELECT * FROM %s;", tbl)
-    df <- fetch_data(qry, dbfile)
+    df <- fetch_data(qry, "data.db")
     
     if (input$state != opts$allstates)
       df <- subset(df, State == input$state, select = -State)
@@ -163,32 +161,44 @@ function(input, output, session) {
     )
   })
   
-  xopts <- reactiveVal(0, "X variable options")
-  observe({
-    # browser()
-    opts <- var_opts(dtInput())
-    xopts(opts)
+  select.opts <- reactiveValues()
+  observe({ # x-variable control
+    select.opts$x <- var_opts(dtInput())
     xval <- isolate(input$x)
     if (!isTruthy(xval))
       xval <- NULL
-    update_var_control(session, controls$xvar$id, choices = xopts(), selected = xval)
+    update_var_control(session, controls$xvar$id, choices = select.opts$x, selected = xval)
   })
   
-  observe({
-    # nms <- var_opts(isolate(dtInput()))
-    nms <- xopts()
+  observe({ # y-variable control
+    nms <- select.opts$x
     x.val <- input$x
-    if (isTruthy(x.val)) {
-      less.one <- nms[!(nms %in% x.val)]
-      update_var_control(session, controls$yvar$id, choices = less.one)
-    }
+    select.opts$y <- if (isTruthy(x.val))
+      nms[!(nms %in% x.val)]
+    else
+      nms
+    update_var_control(
+      session,
+      controls$yvar$id,
+      choices = isolate(select.opts$y),
+      selected = isolate(input$y)
+    )
   })
   
   observeEvent(input$reset,
-               {
-                 update_var_control(session, controls$xvar$id, choices = character(1))
-                 update_var_control(session, controls$yvar$id, choices = character(1))
-                 updateCheckboxInput(session, controls$horiz$id, controls$horiz$name)
+               { 
+                 df <- isolate(dtInput())
+                 select.opts$x <- var_opts(df)
+                 update_var_control(session,
+                                    controls$xvar$id,
+                                    choices = select.opts$x,
+                                    selected = character(1))
+                 update_var_control(session,
+                                    controls$yvar$id,
+                                    choices = isolate(select.opts$y),
+                                    selected = character(1))
+                 updateCheckboxInput(session, controls$horiz$id, controls$horiz$label)
+                 # updateCheckboxInput(session, controls$stack$id, controls$stack$label, value = TRUE)
                })
   
   varclass <- reactiveValues()
@@ -198,16 +208,15 @@ function(input, output, session) {
     if (!isTruthy(x))
       return()
     varclass$X <- .get_class(df, x)
-    varclass$Y <- NULL
     y <- input$y
     if (isTruthy(y)) 
       varclass$Y <- .get_class(df, y)
   })
   
   observeEvent(input$invert, {
-    nms <- isolate(xopts())
-    upd <- function(var, sel, ss = session, cc = nms)
-      update_var_control(ss, var, choices = cc, selected = sel)
+    upd <-
+      function(var, sel, ss = session, cc = isolate(select.opts$x))
+        update_var_control(ss, var, choices = cc, selected = sel)
     upd(controls$xvar$id, isolate(input$y))
     upd(controls$yvar$id, isolate(input$x))
   })
@@ -231,9 +240,11 @@ function(input, output, session) {
     pp <- if (varclass$X == "factor") {
       if (is.null(varclass$Y))
         gg.aes + geom_bar(fill = "darkgreen")
-      else if (varclass$Y == "factor")
+      else if (varclass$Y == "factor") {
+        pos <- if (input$stack) "stack" else "dodge"
         gg.aes +
-        geom_bar(aes_string(fill = yvar))
+        geom_bar(aes_string(fill = yvar), position = pos)
+      }
       else if (.is_num(df, yvar))
         gg.aes + geom_boxplot()
     }
@@ -251,14 +262,16 @@ function(input, output, session) {
   })
   
   
-  output$xvar <- reactive({
-    varclass$X
-  }, 
-  label = "Conditional panel controls")
+  output$xvar <- reactive(varclass$X,
+                          label = "Conditional panel controls")
+  # browser()
+  output$yvar <- reactive(varclass$Y, label = "Additional bivariate panel")
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
+  outputOptions(output, "yvar", suspendWhenHidden = FALSE)
   
   
   
+  ####################
   ## The summary table
   ####################
   output$sumtable <- renderTable({
@@ -269,11 +282,12 @@ function(input, output, session) {
   
   
   
+  #################
   ## The data table
   #################
   output$DT <- renderDataTable({
     if (isFALSE(input$maindata))
       return()
-    dtInput()$df
+    dtInput()
   })
 }
