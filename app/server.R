@@ -9,8 +9,6 @@ library(ggplot2)
 
 source("plotmethod.R")
 
-source("plotmethod.R")
-
 read_from_db <- function(db, tbl, ...) {
   require(RSQLite, quietly = TRUE)
   stopifnot({
