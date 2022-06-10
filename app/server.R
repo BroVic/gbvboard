@@ -8,6 +8,8 @@ library(shiny)
 library(ggplot2)
 # library(jGBV)
 
+source("plotmethod.R")
+
 read_from_db <- function(db, tbl, ...) {
   require(RSQLite, quietly = TRUE)
   stopifnot({
@@ -85,42 +87,15 @@ update_var_control <- function(session, var, ...) {
 }
 
 
-# S4 generic and methods
-# setGeneric("plotMethod", function(x, y, ..., df) standardGeneric("plotMethod"))
-# 
-# setMethod("plotMethod", c("factor", "factor"), function(x, y, df) {
-#   ggplot(df, aes_string(x)) +
-#     geom_bar(aes_string(fill = y))
-# })
-# 
-# setMethod("plotMethod", "factor", function(x, y = NULL, ..., df) {
-#   ggplot(df, aes_string(x, fill = ...))
-# })
-# 
-# setMethod("plotMethod", "numeric", function(x, y = NULL, ..., df) {
-#   ggplot(df, aes_string(x)) +
-#     geom_histogram()
-# })
-# 
-# setMethod("plotMethod", c("numeric", "numeric"), function(x, y, ..., df) {
-#   ggplot(df, aes_string(x, y)) +
-#     geom_point()
-# })
-# 
-# setMethod("plotMethod", c("factor", "numeric"), function(x, y, ..., df) {
-#   ggplot(df, aes_string(x, y)) +
-#     geom_boxplot()
-# })
-# 
-# 
-# make_plot <- function(data, x.var, y.var) {
-#   xcol <- data[[x.var]]
-#   ycol <- NULL
-#   if (!is.null(y.var))
-#     ycol <- data[[y.var]]
-#   browser()
-#   plotMethod(xcol, ycol, data, x = x.var, y = y.var)
-# }
+
+make_plot <- function(data, inputs) {
+  y.var <- inputs$y
+  xcol <- data[[inputs$x]]
+  ycol <- NULL
+  if (!is.null(y.var))
+    ycol <- data[[y.var]]
+  plotMethod(xcol, ycol, df = data, inputs)
+}
 
 
 .get_class <- function(dt, var)  {
@@ -227,33 +202,10 @@ function(input, output, session) {
   ## The main chart
   #################
   output$plot <- renderPlot({
-    xvar <- input$x
-    yvar <- input$y
-    df <- dtInput()
-    
-    if (!isTruthy(xvar))
+    if (!isTruthy(input$x))
       return()
     
-    # pp <- make_plot(df, xvar, yvar)
-    gg.aes <- ggplot(df, aes_string(xvar))
-
-    pp <- if (varclass$X == "factor") {
-      if (is.null(varclass$Y))
-        gg.aes + geom_bar(fill = "darkgreen")
-      else if (varclass$Y == "factor") {
-        pos <- if (input$stack) "stack" else "dodge"
-        gg.aes +
-        geom_bar(aes_string(fill = yvar), position = pos)
-      }
-      else if (.is_num(df, yvar))
-        gg.aes + geom_boxplot()
-    }
-    else if (.is_num(df, xvar)) {
-      if (isTruthy(yvar) && .is_num(df, yvar))
-        gg.aes + geom_point(aes_string(y = yvar))
-      else
-        gg.aes + geom_histogram(bins = input$bins)
-    }
+    pp <- make_plot(dtInput(), input)
     
     if (input$rotate)
       pp <- pp + coord_flip()

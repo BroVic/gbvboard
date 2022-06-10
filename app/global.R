@@ -8,7 +8,8 @@ controls <- list(
   yvar = list(id = "y", label = "y"),
   horiz = list(id = "rotate", label = "Horizontal layout"),
   order = list(id = "order", label = "Order by frequency"),
-  stack = list(id = "stack", label = "Stack bars")
+  stack = list(id = "stack", label = "Stack bars"),
+  bins = list(id = "bins", label = "No. of bins")
 )
 
 opts <- list(allstates = "All")

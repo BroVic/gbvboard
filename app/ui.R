@@ -64,7 +64,7 @@ fluidPage(
           checkboxGroupInput("log", "Log transform", c("None", "log2", "log10"), "None"),
           conditionalPanel(
             "output.yvar == null",
-            sliderInput("bins", "No. of bins", 20, 80, 30)
+            sliderInput(controls$bins$id, controls$bins$label, 20, 80, 30)
           )
         )
       )
