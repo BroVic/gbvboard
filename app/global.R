@@ -15,7 +15,8 @@ controls <- list(
   horiz = list(id = "rotate", label = "Horizontal layout"),
   order = list(id = "order", label = "Order by frequency"),
   stack = list(id = "stack", label = "Stack bars"),
-  reverse = list(id = "reverse", label = "Reverse bar order")
+  reverse = list(id = "reverse", label = "Reverse bar order"),
+  bins = list(id = "bins", label = "No. of bins")
 )
 
 opts <- list(allstates = "All")

@@ -9,6 +9,8 @@ library(ggplot2)
 
 source("plotmethod.R")
 
+source("plotmethod.R")
+
 read_from_db <- function(db, tbl, ...) {
   require(RSQLite, quietly = TRUE)
   stopifnot({
@@ -85,14 +87,15 @@ update_var_control <- function(session, var, ...) {
   updateSelectInput(session, var, stringr::str_to_title(var), ...)
 }
 
-make_plot <- function(data, x.in, y.in, ...) {
-  xcol <- data[[x.in]]
+
+
+make_plot <- function(data, inputs) {
+  y.var <- inputs$y
+  xcol <- data[[inputs$x]]
   ycol <- NULL
-  browser()
-  if (!isTruthy(y.in))
-    return(plotMethod(xcol, x = x.in, df = data, ...))
-    ycol <- data[[y.in]]
-  plotMethod(xcol, ycol, x = x.in, y = y.in, df = data, ...)
+  if (!is.null(y.var))
+    ycol <- data[[y.var]]
+  plotMethod(xcol, ycol, df = data, inputs)
 }
 
 
@@ -209,33 +212,10 @@ function(input, output, session) {
   ## The main chart
   #################
   output$plot <- renderPlot({
-    xvar <- input$x
-    yvar <- input$y
-    df <- dtInput()
-    
-    if (!isTruthy(xvar))
+    if (!isTruthy(input$x))
       return()
     
-    # pp <- make_plot(df, xvar, yvar)
-    gg.aes <- ggplot(df, aes_string(xvar))
-
-    pp <- if (varclass$X == "factor") {
-      if (is.null(varclass$Y))
-        gg.aes + geom_bar(fill = "darkgreen")
-      else if (varclass$Y == "factor") {
-        pos <- if (input$stack) "stack" else "dodge"
-        gg.aes +
-        geom_bar(aes_string(fill = yvar), position = pos)
-      }
-      else if (.is_num(df, yvar))
-        gg.aes + geom_boxplot()
-    }
-    else if (.is_num(df, xvar)) {
-      if (isTruthy(yvar) && .is_num(df, yvar))
-        gg.aes + geom_point(aes_string(y = yvar))
-      else
-        gg.aes + geom_histogram(bins = input$bins)
-    }
+    pp <- make_plot(dtInput(), input)
     
     if (input$rotate)
       pp <- pp + coord_flip()
