@@ -1,3 +1,9 @@
+# Source file: global.R
+#
+# License: MIT
+#
+# Copyright (c) 2022 Victor Ordu
+
 controls <- list(
   project = list(id = "proj", label = "Project"),
   state = list(id = "state", label = "State"),
@@ -8,12 +14,13 @@ controls <- list(
   yvar = list(id = "y", label = "y"),
   horiz = list(id = "rotate", label = "Horizontal layout"),
   order = list(id = "order", label = "Order by frequency"),
-  stack = list(id = "stack", label = "Stack bars")
+  stack = list(id = "stack", label = "Stack bars"),
+  reverse = list(id = "reverse", label = "Reverse bar order")
 )
 
 opts <- list(allstates = "All")
 
-dbTables <- c(Faciities = "FacilitiesBasic")
+dbTables <- c(Facilities = "FacilitiesBasic")
 projectNames <- c("NFWP")
 projects <- 
   structure(projectNames, names = paste0("proj", seq_along(projectNames)))

@@ -7,6 +7,8 @@
 library(shiny)
 library(shinythemes)
 
+ctrl <- controls
+
 fluidPage(
   title = "GBV Dashboard",
   theme = shinytheme("darkly"),
@@ -33,14 +35,14 @@ fluidPage(
     column(
       width = 3,
       inputPanel(
-        selectInput(controls$project$id, controls$project$label, choices = projectNames[1]),
-        selectInput(controls$state$id, controls$state$label, choices = opts$allstates),
-        selectInput(controls$tables$id, controls$tables$label, choices = names(dbTables), selected = "Facilities"),
+        selectInput(ctrl$project$id, ctrl$project$label, choices = projectNames[1]),
+        selectInput(ctrl$state$id, ctrl$state$label, choices = opts$allstates),
+        selectInput(ctrl$tables$id, ctrl$tables$label, choices = names(dbTables), selected = "Facilities"),
         wellPanel(
-          selectInput(controls$xvar$id, controls$xvar$label, choices = ""),
-          selectInput(controls$yvar$id, controls$yvar$label, choices = ''),
-          actionButton(controls$reset$id, controls$reset$label),
-          actionButton(controls$invert$id, controls$invert$label)
+          selectInput(ctrl$xvar$id, ctrl$xvar$label, choices = ""),
+          selectInput(ctrl$yvar$id, ctrl$yvar$label, choices = ''),
+          actionButton(ctrl$reset$id, ctrl$reset$label),
+          actionButton(ctrl$invert$id, ctrl$invert$label)
         )
       )
     ),
@@ -52,11 +54,12 @@ fluidPage(
         plotOutput("plot"),
         conditionalPanel(
           condition = 'output.xvar == "factor"',
-          checkboxInput(controls$horiz$id, controls$horiz$label),
-          checkboxInput(controls$order$id, controls$order$label),
+          checkboxInput(ctrl$horiz$id, ctrl$horiz$label),
+          checkboxInput(ctrl$order$id, ctrl$order$label),
+          checkboxInput(ctrl$reverse$id, ctrl$reverse$label),
           conditionalPanel(
             "output.yvar == 'factor'",
-            checkboxInput(controls$stack$id, controls$stack$label, value = TRUE)
+            checkboxInput(ctrl$stack$id, ctrl$stack$label, value = TRUE)
           )
         ),
         conditionalPanel(

@@ -6,7 +6,8 @@
 
 library(shiny)
 library(ggplot2)
-# library(jGBV)
+
+source("plotmethod.R")
 
 read_from_db <- function(db, tbl, ...) {
   require(RSQLite, quietly = TRUE)
@@ -84,43 +85,15 @@ update_var_control <- function(session, var, ...) {
   updateSelectInput(session, var, stringr::str_to_title(var), ...)
 }
 
-
-# S4 generic and methods
-# setGeneric("plotMethod", function(x, y, ..., df) standardGeneric("plotMethod"))
-# 
-# setMethod("plotMethod", c("factor", "factor"), function(x, y, df) {
-#   ggplot(df, aes_string(x)) +
-#     geom_bar(aes_string(fill = y))
-# })
-# 
-# setMethod("plotMethod", "factor", function(x, y = NULL, ..., df) {
-#   ggplot(df, aes_string(x, fill = ...))
-# })
-# 
-# setMethod("plotMethod", "numeric", function(x, y = NULL, ..., df) {
-#   ggplot(df, aes_string(x)) +
-#     geom_histogram()
-# })
-# 
-# setMethod("plotMethod", c("numeric", "numeric"), function(x, y, ..., df) {
-#   ggplot(df, aes_string(x, y)) +
-#     geom_point()
-# })
-# 
-# setMethod("plotMethod", c("factor", "numeric"), function(x, y, ..., df) {
-#   ggplot(df, aes_string(x, y)) +
-#     geom_boxplot()
-# })
-# 
-# 
-# make_plot <- function(data, x.var, y.var) {
-#   xcol <- data[[x.var]]
-#   ycol <- NULL
-#   if (!is.null(y.var))
-#     ycol <- data[[y.var]]
-#   browser()
-#   plotMethod(xcol, ycol, data, x = x.var, y = y.var)
-# }
+make_plot <- function(data, x.in, y.in, ...) {
+  xcol <- data[[x.in]]
+  ycol <- NULL
+  browser()
+  if (!isTruthy(y.in))
+    return(plotMethod(xcol, x = x.in, df = data, ...))
+    ycol <- data[[y.in]]
+  plotMethod(xcol, ycol, x = x.in, y = y.in, df = data, ...)
+}
 
 
 .get_class <- function(dt, var)  {
@@ -161,26 +134,35 @@ function(input, output, session) {
     )
   })
   
-  select.opts <- reactiveValues()
+  selector.opts <- reactiveValues()
   observe({ # x-variable control
-    select.opts$x <- var_opts(dtInput())
-    xval <- isolate(input$x)
-    if (!isTruthy(xval))
+    selector.opts$x <- var_opts(dtInput())
+    xval <- input$x
+    if (!isTruthy(xval)) {
       xval <- NULL
-    update_var_control(session, controls$xvar$id, choices = select.opts$x, selected = xval)
+      yval <- isolate(input$y)
+      if (isTruthy(yval))
+        xval <- yval
+    }
+    update_var_control(
+      session,
+      controls$xvar$id,
+      choices = isolate(selector.opts$x),
+      selected = xval
+    )
   })
   
   observe({ # y-variable control
-    nms <- select.opts$x
+    nms <- selector.opts$x
     x.val <- input$x
-    select.opts$y <- if (isTruthy(x.val))
+    selector.opts$y <- if (isTruthy(x.val))
       nms[!(nms %in% x.val)]
     else
       nms
     update_var_control(
       session,
       controls$yvar$id,
-      choices = isolate(select.opts$y),
+      choices = isolate(selector.opts$y),
       selected = isolate(input$y)
     )
   })
@@ -188,14 +170,14 @@ function(input, output, session) {
   observeEvent(input$reset,
                { 
                  df <- isolate(dtInput())
-                 select.opts$x <- var_opts(df)
+                 selector.opts$x <- var_opts(df)
                  update_var_control(session,
                                     controls$xvar$id,
-                                    choices = select.opts$x,
+                                    choices = selector.opts$x,
                                     selected = character(1))
                  update_var_control(session,
                                     controls$yvar$id,
-                                    choices = isolate(select.opts$y),
+                                    choices = isolate(selector.opts$y),
                                     selected = character(1))
                  updateCheckboxInput(session, controls$horiz$id, controls$horiz$label)
                  # updateCheckboxInput(session, controls$stack$id, controls$stack$label, value = TRUE)
@@ -215,7 +197,7 @@ function(input, output, session) {
   
   observeEvent(input$invert, {
     upd <-
-      function(var, sel, ss = session, cc = isolate(select.opts$x))
+      function(var, sel, ss = session, cc = isolate(selector.opts$x))
         update_var_control(ss, var, choices = cc, selected = sel)
     upd(controls$xvar$id, isolate(input$y))
     upd(controls$yvar$id, isolate(input$x))
