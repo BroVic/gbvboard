@@ -4,6 +4,8 @@
 #
 # Copyright (c) 2022 Victor Ordu
 
+library(ggplot2)
+
 # S4 generic 
 setGeneric("plotMethod", function(xcol, ycol, df, inputs)
   standardGeneric("plotMethod"),

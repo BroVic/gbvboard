@@ -5,7 +5,6 @@
 # Copyright (c) 2022 Victor Ordu
 
 library(shiny)
-library(ggplot2)
 
 source("plotmethod.R")
 
