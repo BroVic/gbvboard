@@ -92,7 +92,14 @@ make_plot <- function(data, inputs) {
   ycol <- NULL
   if (!is.null(y.var))
     ycol <- data[[y.var]]
-  plotMethod(xcol, ycol, df = data, inputs)
+  p <- plotMethod(xcol, ycol, df = data, inputs)
+  ptitle <- inputs$x
+  if (isTruthy(inputs$y))
+    ptitle <- sprintf("%s and %s", ptitle, inputs$y)
+  
+  
+  p + 
+    ggplot2::labs(x = inputs$x, y = inputs$y, title = paste("Plot of", ptitle))
 }
 
 
@@ -101,11 +108,6 @@ make_plot <- function(data, inputs) {
   class(getElement(dt, var))
 }
 
-
-.is_num <- function(dat, var) {
-  cl <- .get_class(dat, var)
-  cl == "numeric" || cl == "integer"
-}
 
 
 
@@ -208,6 +210,7 @@ function(input, output, session) {
   #
   ## The main chart
   #################
+  currplot <- reactiveVal()
   output$plot <- renderPlot({
     if (!isTruthy(input$x))
       return()
@@ -216,9 +219,19 @@ function(input, output, session) {
     
     if (input$rotate)
       pp <- pp + coord_flip()
-    
+    currplot(pp)
     pp
   })
+  
+  
+  output$saveplot <- downloadHandler(
+    filename = function() {
+      paste("plot-", Sys.Date(), ".png", sep = "")
+    },
+    content = function(file) {
+      ggsave(file, currplot())
+    }
+  )
   
   
   output$xvar <- reactive(varclass$X,

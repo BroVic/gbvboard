@@ -16,7 +16,8 @@ controls <- list(
   order = list(id = "order", label = "Order by frequency"),
   stack = list(id = "stack", label = "Stack bars"),
   reverse = list(id = "reverse", label = "Reverse bar order"),
-  bins = list(id = "bins", label = "No. of bins")
+  bins = list(id = "bins", label = "No. of bins"),
+  saveplot = list(id = 'saveplot', label = 'Save...')
 )
 
 opts <- list(allstates = "All")

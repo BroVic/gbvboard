@@ -54,6 +54,7 @@ fluidPage(
         plotOutput("plot"),
         conditionalPanel(
           condition = 'output.xvar == "factor"',
+          downloadButton(ctrl$saveplot$id, ctrl$saveplot$label),
           checkboxInput(ctrl$horiz$id, ctrl$horiz$label),
           checkboxInput(ctrl$order$id, ctrl$order$label),
           checkboxInput(ctrl$reverse$id, ctrl$reverse$label),
