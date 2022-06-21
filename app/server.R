@@ -121,7 +121,7 @@ function(input, output, session) {
     
     if (input$state != opts$allstates)
       df <- subset(df, State == input$state, select = -State)
-    
+    # browser()
     set_types(df)
   },
   label = "Data initialization")
@@ -220,7 +220,7 @@ function(input, output, session) {
     if (input$rotate)
       pp <- pp + coord_flip()
     currplot(pp)
-    pp
+    isolate(currplot())
   })
   
   
@@ -229,14 +229,13 @@ function(input, output, session) {
       paste("plot-", Sys.Date(), ".png", sep = "")
     },
     content = function(file) {
-      ggsave(file, currplot())
+      ggsave(file, isolate(currplot()))
     }
   )
   
   
   output$xvar <- reactive(varclass$X,
-                          label = "Conditional panel controls")
-  # browser()
+                          label = "Conditional panel controls") 
   output$yvar <- reactive(varclass$Y, label = "Additional bivariate panel")
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
   outputOptions(output, "yvar", suspendWhenHidden = FALSE)

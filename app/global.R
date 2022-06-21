@@ -15,7 +15,7 @@ controls <- list(
   horiz = list(id = "rotate", label = "Horizontal layout"),
   order = list(id = "order", label = "Order by frequency"),
   stack = list(id = "stack", label = "Stack bars"),
-  reverse = list(id = "reverse", label = "Reverse bar order"),
+  reverse = list(id = "reverse", label = "Reverse order"),
   bins = list(id = "bins", label = "No. of bins"),
   saveplot = list(id = 'saveplot', label = 'Save...')
 )
@@ -24,8 +24,14 @@ opts <- list(allstates = "All")
 
 dbTables <- c(Facilities = "FacilitiesBasic")
 projectNames <- c("NFWP")
+
 projects <- 
   structure(projectNames, names = paste0("proj", seq_along(projectNames)))
-projectStates <- list(
-  NFWP = c("Taraba", "Kebbi", "Niger")
+
+projectStates <- structure(
+  list(
+    c("Taraba", "Kebbi", "Niger")
+    # c("Adamawa", "Borno", "Yobe")
+  ),
+  names = projectNames
 )
