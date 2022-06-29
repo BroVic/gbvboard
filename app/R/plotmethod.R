@@ -28,14 +28,16 @@ setMethod("plotMethod", c("factor", "NULL"), function(xcol, ycol, df, inputs) {
 
 
 setMethod("plotMethod", c("numeric", "NULL"), function(xcol, ycol, df, inputs) {
-  ggplot(df, aes_string(inputs$x)) +
+  gg <- ggplot(df, aes_string(inputs$x)) +
     geom_histogram(bins = inputs$bins)
+  .transformLog(gg, inputs)
 })
 
 
 setMethod("plotMethod", c("numeric", "numeric"), function(xcol, ycol, df, inputs) {
-  ggplot(df, aes_string(inputs$x, inputs$y)) +
+  gg <- ggplot(df, aes_string(inputs$x, inputs$y)) +
     geom_point()
+  .transformLog(gg, inputs)
 })
 
 
@@ -43,3 +45,16 @@ setMethod("plotMethod", c("factor", "numeric"), function(xcol, ycol, df, inputs)
   ggplot(df, aes_string(inputs$x, inputs$y)) +
     geom_boxplot()
 })
+
+
+
+## Internal to methods
+.transformLog <- function(gg, inputs) {
+  stopifnot(inherits(gg, "gg"))
+  logval <- inputs[[ctrl$log$id]]
+  if (logval != "None")
+    gg <- gg + 
+      scale_x_continuous(trans = logval) +
+      scale_y_continuous(trans = logval)
+  gg
+}

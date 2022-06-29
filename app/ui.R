@@ -7,8 +7,6 @@
 library(shiny)
 library(shinythemes)
 
-ctrl <- controls
-
 fluidPage(
   title = "GBV Dashboard",
   theme = shinytheme("darkly"),
@@ -35,14 +33,14 @@ fluidPage(
     column(
       width = 3,
       inputPanel(
-        selectInput(ctrl$project$id, ctrl$project$label, choices = projectNames[1]),
-        selectInput(ctrl$state$id, ctrl$state$label, choices = opts$allstates),
-        selectInput(ctrl$tables$id, ctrl$tables$label, choices = names(dbTables), selected = "Facilities"),
+        selectInput(ctrl$project$id, ctrl$project$lab, choices = projectNames[1]),
+        selectInput(ctrl$state$id, ctrl$state$lab, choices = opts$allstates),
+        selectInput(ctrl$tables$id, ctrl$tables$lab, choices = names(dbTables), selected = "Facilities"),
         wellPanel(
-          selectInput(ctrl$xvar$id, ctrl$xvar$label, choices = ""),
-          selectInput(ctrl$yvar$id, ctrl$yvar$label, choices = ''),
-          actionButton(ctrl$reset$id, ctrl$reset$label),
-          actionButton(ctrl$invert$id, ctrl$invert$label)
+          selectInput(ctrl$xvar$id, ctrl$xvar$lab, choices = ""),
+          selectInput(ctrl$yvar$id, ctrl$yvar$lab, choices = ''),
+          actionButton(ctrl$reset$id, ctrl$reset$lab),
+          actionButton(ctrl$invert$id, ctrl$invert$lab)
         )
       )
     ),
@@ -52,24 +50,24 @@ fluidPage(
       width = 6, 
       wellPanel(
         plotOutput("plot"),
+        downloadButton(ctrl$saveplot$id, ctrl$saveplot$lab),
         conditionalPanel(
           condition = 'output.xvar == "factor"',
-          downloadButton(ctrl$saveplot$id, ctrl$saveplot$label),
-          checkboxInput(ctrl$horiz$id, ctrl$horiz$label),
-          checkboxInput(ctrl$order$id, ctrl$order$label),
-          checkboxInput(ctrl$reverse$id, ctrl$reverse$label),
+          checkboxInput(ctrl$horiz$id, ctrl$horiz$lab),
+          checkboxInput(ctrl$order$id, ctrl$order$lab),
+          checkboxInput(ctrl$reverse$id, ctrl$reverse$lab),
           conditionalPanel(
             "output.yvar == 'factor'",
-            checkboxInput(ctrl$stack$id, ctrl$stack$label, value = TRUE)
+            checkboxInput(ctrl$stack$id, ctrl$stack$lab, value = TRUE)
           )
         ),
         conditionalPanel(
           "output.xvar == 'integer' || output.var == 'numeric'",
-          checkboxGroupInput("log", "Log transform", c("None", "log2", "log10"), "None"),
           conditionalPanel(
             "output.yvar == null",
-            sliderInput(controls$bins$id, controls$bins$label, 20, 80, 30)
-          )
+            sliderInput(ctrl$bins$id, ctrl$bins$lab, 20, 80, 30)
+          ),
+          radioButtons(ctrl$log$id, ctrl$log$lab, c("None", "log2", "log10"), "None")
         )
       )
     ),

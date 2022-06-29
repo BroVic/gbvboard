@@ -6,33 +6,35 @@
 
 library(shiny)
 
-source("plotmethod.R")
-
-read_from_db <- function(db, tbl, ...) {
-  require(RSQLite, quietly = TRUE)
-  stopifnot({
-    file.exists(db)
-    is.character(tbl)
-  })
-  con <- dbConnect(SQLite(), db, ...)
-  on.exit(dbDisconnect(con))
-  dbReadTable(con, tbl)
-}
-
-
-.app_table <- function(dat, x, y, ...) {
+# Defines how the summary table is going to be represented
+app_table <- function(dat, inputObj, ...) {
   stopifnot(is.data.frame(dat))
+  x <- inputObj$x
+  y <- inputObj$y
   xcol <- dat[[x]]
-  if (!isTruthy(y))
-    return(table(xcol, ...))
+  freq <- "Frequency"
+  if (!isTruthy(y)) {
+    if (is.factor(xcol))
+      return(table(xcol, dnn = x, ...))
+    if (is.numeric(xcol)) {
+      sm <- summary(xcol, ...)
+      nm <- names(sm)
+      sm <- as.matrix(as.numeric(sm))
+      dimnames(sm) <- list(nm, "Value")
+      return(sm)
+    }
+  }
   table(xcol, dat[[y]], ...) |>
     as.data.frame() |>
-    setNames(c(x, y, "Freq")) |>
-    tidyr::pivot_wider(names_from = dplyr::all_of(y), values_from = "Freq")
+    setNames(c(x, y, freq)) |>
+    tidyr::pivot_wider(names_from = dplyr::all_of(y),
+                       values_from = tidyselect::all_of(freq))
 }
 
 
 
+
+# Sets the variable options for the selector input widgets
 var_opts <- function(df) {
   stopifnot(is.data.frame(df))
   c("", names(df))
@@ -40,28 +42,41 @@ var_opts <- function(df) {
 
 
 
+
+# Sets the columns of the data frame to appropriate types
+# Necessary because the SQL types are not necessarily adequate
+# for our purposes.
 set_types <- function(dat) {
   stopifnot(is.data.frame(dat))
-  ..setType <- function(col) {
+  
+  # Sets the type of a given column based on certain conditions
+  setType <- function(col) {
     if (!is.character(col))
       return(col)
+    
+    tmpcol <- na.omit(col)  # in case there are missing values
+    
     if (length(unique(col)) > 10L) {
-      col <- tryCatch({
-        numchars10 <- all(nchar(col)) == 10L
-        if (numchars10)
-          as.Date(col)
-        else
-          as.POSIXct(col)
-      }, error = function(e)
-        col)
-      if (isFALSE(is.character(col)))
-        return(col)
-      if (all(!naijR::is_lga(col))) # i.e. none are LGAs
+      tryCatch({
+        dgt <- "[[:digit:]]"
+        dgtrgx <- paste0(dgt, "{4}-", dgt, "{2}-", dgt, "{2}.?")
+        
+        if (all(grepl(dgtrgx, tmpcol))) {
+          col <- if (all(nchar(tmpcol)) == 10L)
+            as.Date(col)
+          else
+            as.POSIXct(col)
+          return(col)
+        }
+      }, error = function(e) col)
+      
+      if (all(!naijR::is_lga(tmpcol)))
         return(col)
     }
     as.factor(col)
   }
-  purrr::map_dfc(dat, ..setType)
+  
+  purrr::map_dfc(dat, setType)
 }
 
 
@@ -86,21 +101,27 @@ update_var_control <- function(session, var, ...) {
 
 
 
-make_plot <- function(data, inputs) {
-  y.var <- inputs$y
-  xcol <- data[[inputs$x]]
+make_plot <- function(data, widgets) {
+  require(ggplot2, quietly = TRUE)
+  x.var <- widgets$x
+  y.var <- widgets$y
+  
   ycol <- NULL
-  if (!is.null(y.var))
+  ptitle <- x.var
+  if (isTruthy(y.var)) {
     ycol <- data[[y.var]]
-  p <- plotMethod(xcol, ycol, df = data, inputs)
-  ptitle <- inputs$x
-  if (isTruthy(inputs$y))
-    ptitle <- sprintf("%s and %s", ptitle, inputs$y)
+    ptitle <- sprintf("%s and %s", x.var, y.var)
+  }
+  xcol <- data[[x.var]]
+  p <- plotMethod(xcol, ycol, df = data, widgets)
+  p <- p + 
+    labs(x = x.var, y = y.var, title = paste("Plot of", ptitle))
   
-  
-  p + 
-    ggplot2::labs(x = inputs$x, y = inputs$y, title = paste("Plot of", ptitle))
+  if (widgets$rotate)
+    p <- p + coord_flip()
+  p
 }
+
 
 
 .get_class <- function(dt, var)  {
@@ -112,16 +133,25 @@ make_plot <- function(data, inputs) {
 
 
 
-# Server function
+# === Server function ===
 function(input, output, session) {
   dtInput <- reactive({
+    grepcols <- function(rgx) {
+      which(!grepl(rgx, names(df)))
+    }
     tbl <- dbTables[[input$dbtbl]]
     qry <- sprintf("SELECT * FROM %s;", tbl)
     df <- fetch_data(qry, "data.db")
     
+    # get rid of 'id' columns
+    df <- subset(df, select = grepcols("_id$"))
+    
+    # remove GPS coordinates from Facility data
+    if (input[[ctrl$tables$id]] == "Facilities")
+      df <- subset(df, select = grepcols("^gps_"))
+    
     if (input$state != opts$allstates)
       df <- subset(df, State == input$state, select = -State)
-    # browser()
     set_types(df)
   },
   label = "Data initialization")
@@ -130,15 +160,15 @@ function(input, output, session) {
     project <- input$proj
     updateSelectInput(
       session,
-      controls$state$id, 
-      controls$state$label, 
+      ctrl$state$id, 
+      ctrl$state$label, 
       choices = c(opts$allstates, projectStates[[project]])
     )
   })
   
-  selector.opts <- reactiveValues()
-  observe({ # x-variable control
-    selector.opts$x <- var_opts(dtInput())
+  rSelectOpts <- reactiveValues()
+  observe({                 # x-variable control
+    rSelectOpts$x <- var_opts(dtInput())
     xval <- input$x
     if (!isTruthy(xval)) {
       xval <- NULL
@@ -148,23 +178,23 @@ function(input, output, session) {
     }
     update_var_control(
       session,
-      controls$xvar$id,
-      choices = isolate(selector.opts$x),
+      ctrl$xvar$id,
+      choices = isolate(rSelectOpts$x),
       selected = xval
     )
   })
   
-  observe({ # y-variable control
-    nms <- selector.opts$x
+  observe({              # y-variable control
+    nms <- rSelectOpts$x
     x.val <- input$x
-    selector.opts$y <- if (isTruthy(x.val))
+    rSelectOpts$y <- if (isTruthy(x.val))
       nms[!(nms %in% x.val)]
     else
       nms
     update_var_control(
       session,
-      controls$yvar$id,
-      choices = isolate(selector.opts$y),
+      ctrl$yvar$id,
+      choices = isolate(rSelectOpts$y),
       selected = isolate(input$y)
     )
   })
@@ -172,17 +202,16 @@ function(input, output, session) {
   observeEvent(input$reset,
                { 
                  df <- isolate(dtInput())
-                 selector.opts$x <- var_opts(df)
+                 rSelectOpts$x <- var_opts(df)
                  update_var_control(session,
-                                    controls$xvar$id,
-                                    choices = selector.opts$x,
+                                    ctrl$xvar$id,
+                                    choices = rSelectOpts$x,
                                     selected = character(1))
                  update_var_control(session,
-                                    controls$yvar$id,
-                                    choices = isolate(selector.opts$y),
+                                    ctrl$yvar$id,
+                                    choices = isolate(rSelectOpts$y),
                                     selected = character(1))
-                 updateCheckboxInput(session, controls$horiz$id, controls$horiz$label)
-                 # updateCheckboxInput(session, controls$stack$id, controls$stack$label, value = TRUE)
+                 updateCheckboxInput(session, ctrl$horiz$id, ctrl$horiz$label)
                })
   
   varclass <- reactiveValues()
@@ -199,10 +228,10 @@ function(input, output, session) {
   
   observeEvent(input$invert, {
     upd <-
-      function(var, sel, ss = session, cc = isolate(selector.opts$x))
+      function(var, sel, ss = session, cc = isolate(rSelectOpts$x))
         update_var_control(ss, var, choices = cc, selected = sel)
-    upd(controls$xvar$id, isolate(input$y))
-    upd(controls$yvar$id, isolate(input$x))
+    upd(ctrl$xvar$id, isolate(input$y))
+    upd(ctrl$yvar$id, isolate(input$x))
   })
   
   #
@@ -210,17 +239,15 @@ function(input, output, session) {
   #
   ## The main chart
   #################
-  currplot <- reactiveVal()
+  rGgObj <- reactiveVal()
   output$plot <- renderPlot({
     if (!isTruthy(input$x))
       return()
     
     pp <- make_plot(dtInput(), input)
     
-    if (input$rotate)
-      pp <- pp + coord_flip()
-    currplot(pp)
-    isolate(currplot())
+    rGgObj(pp)
+    isolate(rGgObj())
   })
   
   
@@ -229,14 +256,15 @@ function(input, output, session) {
       paste("plot-", Sys.Date(), ".png", sep = "")
     },
     content = function(file) {
-      ggsave(file, isolate(currplot()))
+      ggsave(file, isolate(rGgObj()))
     }
   )
   
   
   output$xvar <- reactive(varclass$X,
-                          label = "Conditional panel controls") 
-  output$yvar <- reactive(varclass$Y, label = "Additional bivariate panel")
+                          label = "Conditional panel ctrl") 
+  output$yvar <- reactive(varclass$Y, 
+                          label = "Additional variable panel")
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
   outputOptions(output, "yvar", suspendWhenHidden = FALSE)
   
@@ -248,8 +276,10 @@ function(input, output, session) {
   output$sumtable <- renderTable({
     if (!isTruthy(input$x))
       return()
-    .app_table(dtInput(), input$x, input$y)
-  })
+    app_table(dtInput(), input)
+  },
+  rownames = TRUE,
+  bordered = TRUE)
   
   
   
