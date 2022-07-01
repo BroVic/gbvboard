@@ -58,7 +58,11 @@ fluidPage(
           checkboxInput(ctrl$reverse$id, ctrl$reverse$lab),
           conditionalPanel(
             "output.yvar == 'factor'",
-            checkboxInput(ctrl$stack$id, ctrl$stack$lab, value = TRUE)
+            checkboxInput(ctrl$stack$id, ctrl$stack$lab, value = TRUE),
+            conditionalPanel(
+              "input.stack == true",
+              checkboxInput(ctrl$fill$id, ctrl$fill$lab, value = FALSE)
+            )
           )
         ),
         conditionalPanel(

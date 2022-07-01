@@ -15,6 +15,7 @@ ctrl <- list(
   horiz = list(id = "rotate", lab = "Horizontal layout"),
   order = list(id = "order", lab = "Order by frequency"),
   stack = list(id = "stack", lab = "Stack bars"),
+  fill = list(id = "fill", lab = "Fill"),
   reverse = list(id = "reverse", lab = "Reverse order"),
   bins = list(id = "bins", lab = "No. of bins"),
   saveplot = list(id = 'saveplot', lab = 'Save...'),

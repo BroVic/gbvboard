@@ -100,6 +100,15 @@ update_var_control <- function(session, var, ...) {
 }
 
 
+reset_plot_orientation <- function(session, controls) {
+  updateCheckboxInput(
+    session, 
+    controls$horiz$id, 
+    controls$horiz$lab, 
+    value = FALSE
+  )
+}
+
 
 make_plot <- function(data, widgets) {
   require(ggplot2, quietly = TRUE)
@@ -161,7 +170,7 @@ function(input, output, session) {
     updateSelectInput(
       session,
       ctrl$state$id, 
-      ctrl$state$label, 
+      ctrl$state$lab, 
       choices = c(opts$allstates, projectStates[[project]])
     )
   })
@@ -211,8 +220,13 @@ function(input, output, session) {
                                     ctrl$yvar$id,
                                     choices = isolate(rSelectOpts$y),
                                     selected = character(1))
-                 updateCheckboxInput(session, ctrl$horiz$id, ctrl$horiz$label)
+                 reset_plot_orientation(session, ctrl)
                })
+  
+  observeEvent({
+    !input$stack
+  },
+  updateCheckboxInput(session, ctrl$fill$id, ctrl$fill$lab, value = FALSE))
   
   varclass <- reactiveValues()
   observe({
@@ -221,6 +235,8 @@ function(input, output, session) {
     if (!isTruthy(x))
       return()
     varclass$X <- .get_class(df, x)
+    if (varclass$X != "factor")
+      reset_plot_orientation(session, ctrl)
     y <- input$y
     if (isTruthy(y)) 
       varclass$Y <- .get_class(df, y)
