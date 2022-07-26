@@ -32,8 +32,9 @@ library(jGBV)
 projOpts <-
   list(name = getOption("jgbv.project.name"),
        year = getOption("jgbv.project.year"),
-       vars = getOption("jgbv.new.colnames"),
-       regex = getOption("jgbv.multiresponse.regex"))
+       vars = getOption("jgbv.new.varnames"),
+       regex = getOption("jgbv.multiresponse.regex"),
+       states = getOption("jgbv.project.states"))
 
 # Functions ----
 loadData <-
@@ -48,32 +49,24 @@ loadData <-
   }
 
 
-append_to_db <- function(df, tbl, db = dbpath) {
+append_to_db <- function(df, tbl, db) {
   require(RSQLite)
   
-  .checkExistingData <- function() {
-    dfDb <- dbGetQuery(con, sprintf("SELECT * FROM %s;", tbl))
-    if (!nrow(dfDb))
-      return(FALSE)
-    dfnames <- names(df)
-    if ("id" %in% names(dfDb) && isFALSE("id" %in% dfnames))
-      dfDb$id <- NULL
-    if (!identical(dfnames, names(dfDb)))
-      stop(sprintf("The column names in the table and the input data differ"))
-    dfx <- rbind(dfDb, head(df))
-    anyDuplicated(dfx, fromLast = TRUE) > 0L
-  }
-  
   tryCatch({
-    con <- dbConnect(SQLite(), dbpath)
     cat("Populating table", sQuote(tbl), "... ")
-    if (.checkExistingData()) {
+    con <- dbConnect(SQLite(), db)
+    
+    if (.checkExistingData(con, tbl)) {
       warning(sprintf("The data in '%s' already exists in table %s",
                    deparse(substitute(df)),
                    tbl),
               call. = FALSE)
     }
-    dbAppendTable(con, tbl, df)
+    old <- .fetchDbTable(con, tbl)
+    if (nrow(old))
+      dbAppendTable(con, tbl, df)
+    else
+      dbWriteTable(con, tbl, df, append = TRUE)
     cat("Done\n")
   }, 
   error = function(e) {
@@ -81,9 +74,51 @@ append_to_db <- function(df, tbl, db = dbpath) {
     warning(conditionMessage(e), call. = FALSE)
   },
   warning = function(w) {
-    cat("Skipped\n")
+    cat("Skipped.", sQuote(tbl), "already exists\n")
   }, finally = dbDisconnect(con))
 }
+
+
+
+# Internal function that checks whether the data already exist
+# in the database table, returning TRUE when this is so, otherwise FALSE
+# If non-matching tables are checked, it signals an error.
+.checkExistingData <- function(conn, table) {
+  .assertDbConnect(conn, table)
+  dd <- .fetchDbTable(conn, table)
+  if (!nrow(dd))
+    return(FALSE)
+  dfnames <- names(df)
+  if ("id" %in% names(dd) && isFALSE("id" %in% dfnames))
+    dd$id <- NULL
+  if (!identical(dfnames, names(dd)))
+    stop(
+      sprintf("The column names in the table and the input data differ")
+    )
+  
+  # We bind a few rows of the data we want to input to the
+  # previously existing one. If there are any duplications, we
+  # can safely assume that the data are pre-existent.
+  if (anyDuplicated(df)) {
+    df <- unique(df)  # deal with duplicate records in original data
+    warning("Duplicate rows were found and removed") # TODO: Quantify.
+  }
+  dfx <- rbind(dd, head(df))
+  as.logical(anyDuplicated(dfx, fromLast = TRUE))
+}
+
+
+
+.fetchDbTable <- function(con, tbl) {
+  .assertDbConnect(con, tbl)
+  dbGetQuery(con, sprintf("SELECT * FROM %s;", tbl))
+}
+
+
+.assertDbConnect <- function(c, t) {
+  stopifnot(RSQLite::dbIsValid(c), is.character(t))
+}
+
 
 
 get_labels_via_rgx <- function(df, rgx) {
@@ -135,7 +170,7 @@ create_multiresponse_group <-
     if (is.null(lbls))
       stop("There no labels for this group")
     lbl.df <- data.frame(name = lbls)
-    print(try(append_to_db(lbl.df, label.tbl)))
+    print(try(append_to_db(lbl.df, label.tbl, dbpath)))
     
     if (is.null(bridge.tbl))
       return(invisible())
@@ -151,7 +186,7 @@ create_multiresponse_group <-
       select(-c(name, value)) %>%
       rename(opt_id = id)
     
-    try(append_to_db(df, bridge.tbl))
+    try(append_to_db(df, bridge.tbl, dbpath))
   }
 
 
@@ -168,7 +203,7 @@ create_singleresponse_tbl <- function(col, tblname, data = alldata) {
     as.character()
   df <- data.frame(name = vals)
   
-  append_to_db(df, tblname)
+  append_to_db(df, tblname, dbpath)
 }
 
 
@@ -213,8 +248,6 @@ drop_db_table <- function(tblname) {
 
 
 # Project Data ----
-states <- getOption("jgbv.project.states")
-
 dbpath <- if (interactive()) {
   file.choose()
 } else {
@@ -223,6 +256,7 @@ dbpath <- if (interactive()) {
 }
     
 
+states <- projOpts$states
 alldata <- states %>% 
   lapply(\(x) {
     # Old code used purrr::map_df. This workaround is used
@@ -231,7 +265,7 @@ alldata <- states %>%
     d <- load_data(dbpath, x)
     d <- transform(
       d, 
-      oth.sheltamen.dscrb = as.character(oth.sheltamen.dscrb)
+      descr_oth_sheltamen = as.character(descr_oth_sheltamen)
     )
   }) |>
   bind_rows() |>
@@ -260,12 +294,13 @@ alldata <- alldata %>%
 # Table operations ----
 
 ## We start by populating the Project and States tables
-try(append_to_db(as.data.frame(projOpts), tbl = "Projects"))
+proj <- data.frame(name = projOpts$name, year = projOpts$year)
+try( append_to_db(proj, tbl = "Projects", dbpath) )
 
 local({
   tables <- c("States", "LGAs", "Devices")
   variables <- projOpts$vars[c("state", "lga", "device.id")]
-  Map(create_singleresponse_tbl, variables, tables)
+  invisible(Map(create_singleresponse_tbl, variables, tables))
 })
 
 # The Interviewers
@@ -274,7 +309,7 @@ local({
   interviewer <- alldata[, c(ivars['interviewer'], ivars['interviewer.contact'])]
   interviewer <- interviewer[!duplicated(interviewer[[1L]]), ]
   names(interviewer) <- c("name", "contact")
-  append_to_db(interviewer, "Interviewer")
+  append_to_db(interviewer, "Interviewer", dbpath)
 })
 
 # Facility-specific data
@@ -369,15 +404,15 @@ local({
       "comment.coord",
       "service.othersdetail"
     )
-  varnames <- projOpts$vars[var.index]
-  facilcol <- c(facility.id = "facility_id", varnames)
+  varnames <- unname(projOpts$vars[var.index])
+  facilcol <- c("facility_id", varnames)
   
   # Convert Y/N variables to binary values
   bools <- c(38, 43:44, 46, 52:53, 56:57, 60:63, 65, 69, 81, 84) + 1
   bools <- facilcol[bools]
   
   facdb <- alldata %>% 
-    select(all_of(unname(facilcol))) %>% 
+    select(all_of(facilcol)) %>% 
     mutate(across(all_of(bools), make_boolean))
   
   tables <-
@@ -410,27 +445,21 @@ local({
     "showed.docs"
   )
   
-  Map(create_singleresponse_tbl, projOpts$vars[var.index], tables)
+  fields <- projOpts$vars[var.index]
+  invisible(Map(create_singleresponse_tbl, fields, tables))
   create_singleresponse_tbl(c("Always", "Sometimes", "Never"), "ReferralToOptions")
   
-  # Merge reference tables with main one via their respective PK IDs
-  interviewer.db <- read_from_db(dbpath, "Interviewer")
-  interviewer.db$contact <- NULL  # column not needed for referencing
-  
   ## NB: `link_db_tables` can work with a table name OR a session data frame!
-  tables <- tables[-length(tables)]
-  y <- c(tables, "States", "LGAs", "Devices")
-  
-  var.index <- var.index[-length(var.index)]
+  last.element <- length(tables)
+  tables <- tables[-last.element]
+  var.index <- var.index[-last.element]
   var.index <- c(var.index, "state", "lga", "device.id")
-  by.x <- projOpts$vars[var.index]
+  
+  y.tables <- c(tables, "States", "LGAs", "Devices")
+  by.x <- unname(projOpts$vars[var.index])
   
   ref.col <-
     c(
-      "state_id",
-      "lga_id",
-      "interviewer_id",
-      "device_id",
       "agegrp_id",
       "orgtype_id",
       "open247_id",
@@ -440,12 +469,18 @@ local({
       "elecstore_id", 
       "signedcoc_id",
       "updates_id",
-      "choosetreat_id"
+      "choosetreat_id",
+      "state_id",
+      "lga_id",
+      "device_id"
     )
   
   for (i in seq_along(tables))
-    facdb <- link_db_tables(facdb, y[i], by.x[i], "name", ref.col[i])
+    facdb <- link_db_tables(facdb, y.tables[i], by.x[i], "name", ref.col[i])
   
+  # Merge reference tables with main one via their respective PK IDs
+  interviewer.db <- read_from_db(dbpath, "Interviewer")
+  interviewer.db$contact <- NULL  # column not needed for referencing
   facdb <-
     link_db_tables(facdb, interviewer.db, "interviewer_name", "name", "interviewer_id")
   
@@ -454,42 +489,42 @@ local({
     facdb <- 
       link_db_tables(facdb, "ReferralToOptions", i, "name", paste0(i, "_id"))
   
-  append_to_db(facdb, "Facility")
+  append_to_db(facdb, "Facility", dbpath)
 })
 
-
-rgx.index <-
-  c(
-    "gbv.types",
-    "equip.missing",
-    "docs.used",
-    "funding",
-    "daysofweek",
-    "service.type"
-  )
-tables <-
-  c("GBVtypes",
-    "Missing",
-    "Doctypes",
-    "Funding",
-    "Days",
-    "ServiceType")
-
-bridges <- 
-  c(
-    "GBVtypesFacility",
-    "MissingFacility",
-    "DoctypesFacility",
-    "FundingFacility",
-    "DaysFacility",
-    "ServicetypeFacility"
-  )
-
-for (i in seq_along(rgx.index))
-  create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
-
-create_singleresponse_tbl(projOpts$vars['open.247'], "OpenAccess")
-
+local({
+  rgx.index <-
+    c(
+      "gbv.types",
+      "equip.missing",
+      "docs.used",
+      "funding",
+      "daysofweek",
+      "service.type"
+    )
+  tables <-
+    c("GBVtypes",
+      "Missing",
+      "Doctypes",
+      "Funding",
+      "Days",
+      "ServiceType")
+  
+  bridges <-
+    c(
+      "GBVtypesFacility",
+      "MissingFacility",
+      "DoctypesFacility",
+      "FundingFacility",
+      "DaysFacility",
+      "ServicetypeFacility"
+    )
+  
+  for (i in seq_along(rgx.index))
+    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+  
+  create_singleresponse_tbl(projOpts$vars['open.247'], "OpenAccess")
+})
 # Health services
 local({
   
@@ -560,7 +595,7 @@ local({
     h.data <- link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
   }
   
-  append_to_db(h.data, "Health")
+  append_to_db(h.data, "Health", dbpath)
   
 })
 
@@ -603,7 +638,7 @@ local({
   for (i in 1:2)
     l.data <- link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i])
   
-  append_to_db(l.data, "Legal")
+  append_to_db(l.data, "Legal", dbpath)
 })
 
 
@@ -638,7 +673,7 @@ local({
   psy.data <-
     link_db_tables(psy.data, "CostOpts", "psych_fees", "name", "psychfees_id")
   
-  append_to_db(psy.data, "Psychosocial")
+  append_to_db(psy.data, "Psychosocial", dbpath)
   
 })
 
@@ -683,10 +718,10 @@ local({
   for (i in 1:3)
     create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
   
-  pol.data <- 
+  pol.data <-
     link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id")
   
-  append_to_db(pol.data, "Police")
+  append_to_db(pol.data, "Police", dbpath)
   
 })
 
@@ -734,7 +769,7 @@ local({
                    "name",
                    "elecwater_id")
   
-  append_to_db(shel.data, "Shelter")
+  append_to_db(shel.data, "Shelter", dbpath)
 })
 
 
@@ -757,7 +792,7 @@ local({
                              "EconServices",
                              "EconservicesFacility")
   
-  append_to_db(econ.data, "Economic")
+  append_to_db(econ.data, "Economic", dbpath)
 })
 
 # local({
