@@ -4,20 +4,22 @@
 #
 # Copyright (c) 2022 Victor Ordu
 
-controls <- list(
-  project = list(id = "proj", label = "Project"),
-  state = list(id = "state", label = "State"),
-  tables = list(id = "dbtbl", label = "Data"),
-  reset = list(id = "reset", label = "Clear"),
-  invert = list(id = "invert", label = "Invert"),
-  xvar = list(id = "x", label = "x"),
-  yvar = list(id = "y", label = "y"),
-  horiz = list(id = "rotate", label = "Horizontal layout"),
-  order = list(id = "order", label = "Order by frequency"),
-  stack = list(id = "stack", label = "Stack bars"),
-  reverse = list(id = "reverse", label = "Reverse order"),
-  bins = list(id = "bins", label = "No. of bins"),
-  saveplot = list(id = 'saveplot', label = 'Save...')
+ctrl <- list(
+  project = list(id = "proj", lab = "Project"),
+  state = list(id = "state", lab = "State"),
+  tables = list(id = "dbtbl", lab = "Data"),
+  reset = list(id = "reset", lab = "Clear"),
+  invert = list(id = "invert", lab = "Invert"),
+  xvar = list(id = "x", lab = "x"),
+  yvar = list(id = "y", lab = "y"),
+  horiz = list(id = "rotate", lab = "Horizontal layout"),
+  order = list(id = "order", lab = "Order by frequency"),
+  stack = list(id = "stack", lab = "Stack bars"),
+  fill = list(id = "fill", lab = "Fill"),
+  reverse = list(id = "reverse", lab = "Reverse order"),
+  bins = list(id = "bins", lab = "No. of bins"),
+  saveplot = list(id = 'saveplot', lab = 'Save...'),
+  log = list(id = "log", lab = "Log transform")
 )
 
 opts <- list(allstates = "All")
