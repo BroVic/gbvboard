@@ -8,10 +8,19 @@
 # data from the project. We are using cleaned/transformed data 
 
 # Dependencies ----
+library(dplyr, warn.conflicts = FALSE)
+library(tidyr)
+suppressPackageStartupMessages(library(here))
+library(labelled)
+library(jGBV, quietly = TRUE)
+
 params <- commandArgs(trailingOnly = TRUE)
 
 dir <- if (interactive()) {
-  dirname(file.choose())
+  rs.proj <- file.choose()
+  if (!endsWith(rs.proj, ".Rproj"))
+    stop("Selected file is not an RStudio project file")
+  dirname(rs.proj)
 } else {
   params[1]
 }
@@ -20,13 +29,9 @@ if (is.na(dir) || identical(dir, ""))
   stop("No project directory chosen")
 if (!dir.exists(dir))
   stop("Directory", sQuote(dir), "does not exist")
+dir <- normalizePath(dir, winslash = "/")
 source(file.path(dir, ".Rprofile"))
 
-library(dplyr)
-library(tidyr)
-library(here)
-library(labelled)
-library(jGBV)
 
 # Options ----
 projOpts <-
@@ -36,7 +41,10 @@ projOpts <-
        regex = getOption("jgbv.multiresponse.regex"),
        states = getOption("jgbv.project.states"))
 
+
 # Functions ----
+# This function is temporarily created for dealing with projects
+# other than NFWP, pending harmonization of approach to data import
 loadData <-
   function(state = character(0),
            type = c("services", "capacity")) {
@@ -48,15 +56,15 @@ loadData <-
     readRDS(path)
   }
 
-
+# Appends data to already created database tables
 append_to_db <- function(df, tbl, db) {
-  require(RSQLite)
+  require(RSQLite, quietly = TRUE)
   
   tryCatch({
     cat("Populating table", sQuote(tbl), "... ")
     con <- dbConnect(SQLite(), db)
     
-    if (.checkExistingData(con, tbl)) {
+    if (.checkExistingData(con, df, tbl)) {
       warning(sprintf("The data in '%s' already exists in table %s",
                    deparse(substitute(df)),
                    tbl),
@@ -83,12 +91,12 @@ append_to_db <- function(df, tbl, db) {
 # Internal function that checks whether the data already exist
 # in the database table, returning TRUE when this is so, otherwise FALSE
 # If non-matching tables are checked, it signals an error.
-.checkExistingData <- function(conn, table) {
+.checkExistingData <- function(conn, data, table) {
   .assertDbConnect(conn, table)
   dd <- .fetchDbTable(conn, table)
   if (!nrow(dd))
     return(FALSE)
-  dfnames <- names(df)
+  dfnames <- names(data)
   if ("id" %in% names(dd) && isFALSE("id" %in% dfnames))
     dd$id <- NULL
   if (!identical(dfnames, names(dd)))
@@ -99,8 +107,8 @@ append_to_db <- function(df, tbl, db) {
   # We bind a few rows of the data we want to input to the
   # previously existing one. If there are any duplications, we
   # can safely assume that the data are pre-existent.
-  if (anyDuplicated(df)) {
-    df <- unique(df)  # deal with duplicate records in original data
+  if (anyDuplicated(data)) {
+    df <- unique(data)  # deal with duplicate records in original data
     warning("Duplicate rows were found and removed") # TODO: Quantify.
   }
   dfx <- rbind(dd, head(df))
@@ -182,7 +190,7 @@ create_multiresponse_group <-
     df <- fac.lbl.df %>%
       pivot_longer(2:last_col()) %>%
       filter(value != 0L) %>%
-      left_join(nlbl.df) %>%
+      left_join(nlbl.df, by = "name") %>%
       select(-c(name, value)) %>%
       rename(opt_id = id)
     
@@ -272,8 +280,6 @@ alldata <- states %>%
   as_tibble()
 
 var_label(alldata) <- var_label(load_data(dbpath, states[1]), unlist = TRUE)
-
-
 var.rgx <- as.list(projOpts$regex)
 
 ## Some of the variable are converted to factors by `loadData`; we don't 
@@ -446,24 +452,24 @@ local({
   )
   
   fields <- projOpts$vars[var.index]
-  invisible(Map(create_singleresponse_tbl, fields, tables))
+  invisible( Map(create_singleresponse_tbl, fields, tables) )
   create_singleresponse_tbl(c("Always", "Sometimes", "Never"), "ReferralToOptions")
   
   ## NB: `link_db_tables` can work with a table name OR a session data frame!
   last.element <- length(tables)
   tables <- tables[-last.element]
   var.index <- var.index[-last.element]
-  var.index <- c(var.index, "state", "lga", "device.id")
   
+  var.index <- c(var.index, "state", "lga", "device.id")
   y.tables <- c(tables, "States", "LGAs", "Devices")
   by.x <- unname(projOpts$vars[var.index])
-  
   ref.col <-
     c(
       "agegrp_id",
       "orgtype_id",
       "open247_id",
       "docsareshown_id",
+      "datastorage_id",
       "privateques_id",
       "datastorage_id",
       "elecstore_id", 
@@ -475,7 +481,7 @@ local({
       "device_id"
     )
   
-  for (i in seq_along(tables))
+  for (i in seq_along(y.tables))
     facdb <- link_db_tables(facdb, y.tables[i], by.x[i], "name", ref.col[i])
   
   # Merge reference tables with main one via their respective PK IDs
@@ -491,6 +497,7 @@ local({
   
   append_to_db(facdb, "Facility", dbpath)
 })
+
 
 local({
   rgx.index <-
@@ -522,9 +529,9 @@ local({
   
   for (i in seq_along(rgx.index))
     create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
-  
-  create_singleresponse_tbl(projOpts$vars['open.247'], "OpenAccess")
 })
+
+
 # Health services
 local({
   
@@ -744,8 +751,8 @@ local({
       "shelter.support",            # bool
       "shelter.new.support"         # bool
     )
-  varnames <- projOpts$vars[var.index]
-  shel.col <- unname(c("facility_id", varnames))
+  varnames <- unname(projOpts$vars[var.index])
+  shel.col <- c("facility_id", varnames)
   booleans <- shel.col[c(4:5, 11:12)]
   shel.data <- filter_alldata(srvtype_shelt, shel.col, booleans)
   
@@ -760,14 +767,12 @@ local({
   for (i in 1:3)
     create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
   
-  create_singleresponse_tbl(projOpts$vars['electricwater'], "ElectricWater", shel.data)
+  varname <- unname(projOpts$vars['electricwater'])
+  elec.tbl <- "ElectricWater"
+  create_singleresponse_tbl(varname, elec.tbl, shel.data)
   
   shel.data <-
-    link_db_tables(shel.data,
-                   "ElectricWater",
-                   projOpts$vars['electricwater'],
-                   "name",
-                   "elecwater_id")
+    link_db_tables(shel.data, elec.tbl, varname, "name", "elecwater_id")
   
   append_to_db(shel.data, "Shelter", dbpath)
 })
@@ -795,18 +800,19 @@ local({
   append_to_db(econ.data, "Economic", dbpath)
 })
 
-# local({
-#   if (interactive())
-#     ans <- menu(c("Yes", "No"), title = "Remove the original tables?")
-#   if (ans == 2L)
-#     return()
-#   for (state in states) {
-#     for (category in c("services", "capacity")) {
-#       for (table in c("cleaned", "labelled")) {
-#         tblname <- sprintf("%s_%s_%s", tolower(state), category, table)
-#         drop_db_table(tblname)
-#       }
-#     }
-#   }
-#   
-# })
+# Remove the original tables
+local({
+  ans <- 1L
+  if (interactive())
+    ans <- menu(c("Yes", "No"), title = "Remove the original tables?")
+  if (ans == 2L)
+    return()
+  for (state in states) {
+    for (category in c("services", "capacity")) {
+      for (table in c("cleaned", "labelled")) {
+        tblname <- sprintf("%s_%s_%s", tolower(state), category, table)
+        drop_db_table(tblname)
+      }
+    }
+  }
+})
