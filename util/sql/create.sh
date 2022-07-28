@@ -35,7 +35,7 @@ nfwp_db=$nfwp_dir/data/nfwp.db
 # Start by copying the database from the project
 echo "Creating the app database with its tables"
 cd $sql_dir
-app_db=$sql_dir/app.db
+app_db=$sql_dir/data.db
 
 cp $nfwp_db $app_db
 sqlite3 $app_db < create.sql
@@ -50,5 +50,7 @@ echo "Creating the database views"
 cd $sql_dir
 sqlite3 $app_db < views.sql
 
+echo "Installing the database"
+mv $app_db ../../app
+
 cd $proj_dir
-echo "Operation completed successfully"
