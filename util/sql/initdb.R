@@ -8,11 +8,11 @@
 # data from the project. We are using cleaned/transformed data 
 
 # Dependencies ----
-library(dplyr, warn.conflicts = FALSE)
 library(tidyr)
-suppressPackageStartupMessages(library(here))
 library(labelled)
 library(jGBV, quietly = TRUE)
+library(dplyr, warn.conflicts = FALSE)
+suppressPackageStartupMessages(library(here))
 
 params <- commandArgs(trailingOnly = TRUE)
 
@@ -35,26 +35,32 @@ source(file.path(dir, ".Rprofile"))
 
 # Options ----
 projOpts <-
-  list(name = getOption("jgbv.project.name"),
-       year = getOption("jgbv.project.year"),
-       vars = getOption("jgbv.new.varnames"),
-       regex = getOption("jgbv.multiresponse.regex"),
-       states = getOption("jgbv.project.states"))
+  list(
+    name = getOption("jgbv.project.name"),
+    year = getOption("jgbv.project.year"),
+    vars = getOption("jgbv.new.varnames"),
+    regex = getOption("jgbv.multiresponse.regex"),
+    states = getOption("jgbv.project.states")
+  )
 
 
 # Functions ----
 # This function is temporarily created for dealing with projects
 # other than NFWP, pending harmonization of approach to data import
 loadData <-
-  function(state = character(0),
+  function(dbpath,
+           state = character(0),
            type = c("services", "capacity")) {
     stopifnot(length(state) == 1, is.character(state))
     type <- match.arg(type)
-    # .loadFromDb(state, type)
-    rdsfilename <- paste0('cleaned-', type, '.rds')
-    path <- file.path(Sys.getenv('NEDC_DATADIR'), state, rdsfilename)
-    readRDS(path)
+    try({
+      con <- RSQLite::dbConnect(RSQLite::SQLite(), dbpath)
+      on.exit(RSQLite::dbDisconnect(con))
+      tbl <- tolower(paste(state, type, sep = "_"))
+      RSQLite::dbReadTable(con, tbl)
+    })
   }
+
 
 # Appends data to already created database tables
 append_to_db <- function(df, tbl, db) {
@@ -265,12 +271,20 @@ dbpath <- if (interactive()) {
     
 
 states <- projOpts$states
+
 alldata <- states %>% 
-  lapply(\(x) {
+  lapply(\(state) {
     # Old code used purrr::map_df. This workaround is used
     # to circumvent a type disparity in the variable being
     # transformed below.
-    d <- load_data(dbpath, x)
+    rems <- removed_variables(state)
+    vars <- projOpts$vars
+    
+    if (!is.null(rems))
+      vars <- vars[-rems]
+    
+    browser()
+    d <- load_data(dbpath, state, vars = vars)
     d <- transform(
       d, 
       descr_oth_sheltamen = as.character(descr_oth_sheltamen)
