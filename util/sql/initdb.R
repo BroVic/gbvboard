@@ -8,12 +8,22 @@
 # data from the project. We are using cleaned/transformed data 
 
 # Dependencies ----
-library(dplyr, warn.conflicts = FALSE)
-library(tidyr)
+here::i_am(script.path <- "util/sql/initdb.R")
 suppressPackageStartupMessages(library(here))
+
+helperfile <- "dbfuns.R"
+if (getwd() == here())
+  helperfile <- file.path(dirname(script.path), helperfile)
+source(helperfile)
+
+library(tidyr)
+library(purrr)
 library(labelled)
 library(jGBV, quietly = TRUE)
+library(dplyr, warn.conflicts = FALSE)
 
+
+# Project Data ----
 params <- commandArgs(trailingOnly = TRUE)
 
 dir <- if (interactive()) {
@@ -24,262 +34,29 @@ dir <- if (interactive()) {
 } else {
   params[1]
 }
-
 if (is.na(dir) || identical(dir, ""))
   stop("No project directory chosen")
+
 if (!dir.exists(dir))
   stop("Directory", sQuote(dir), "does not exist")
 dir <- normalizePath(dir, winslash = "/")
-source(file.path(dir, ".Rprofile"))
 
+projOpts <- get_project_options(dir)
 
-# Options ----
-projOpts <-
-  list(name = getOption("jgbv.project.name"),
-       year = getOption("jgbv.project.year"),
-       vars = getOption("jgbv.new.varnames"),
-       regex = getOption("jgbv.multiresponse.regex"),
-       states = getOption("jgbv.project.states"))
-
-
-# Functions ----
-# This function is temporarily created for dealing with projects
-# other than NFWP, pending harmonization of approach to data import
-loadData <-
-  function(state = character(0),
-           type = c("services", "capacity")) {
-    stopifnot(length(state) == 1, is.character(state))
-    type <- match.arg(type)
-    # .loadFromDb(state, type)
-    rdsfilename <- paste0('cleaned-', type, '.rds')
-    path <- file.path(Sys.getenv('NEDC_DATADIR'), state, rdsfilename)
-    readRDS(path)
-  }
-
-# Appends data to already created database tables
-append_to_db <- function(df, tbl, db) {
-  require(RSQLite, quietly = TRUE)
-  
-  tryCatch({
-    cat("Populating table", sQuote(tbl), "... ")
-    con <- dbConnect(SQLite(), db)
-    
-    if (.checkExistingData(con, df, tbl)) {
-      warning(sprintf("The data in '%s' already exists in table %s",
-                   deparse(substitute(df)),
-                   tbl),
-              call. = FALSE)
-    }
-    old <- .fetchDbTable(con, tbl)
-    if (nrow(old))
-      dbAppendTable(con, tbl, df)
-    else
-      dbWriteTable(con, tbl, df, append = TRUE)
-    cat("Done\n")
-  }, 
-  error = function(e) {
-    cat("Failed\n")
-    warning(conditionMessage(e), call. = FALSE)
-  },
-  warning = function(w) {
-    cat("Skipped.", sQuote(tbl), "already exists\n")
-  }, finally = dbDisconnect(con))
-}
-
-
-
-# Internal function that checks whether the data already exist
-# in the database table, returning TRUE when this is so, otherwise FALSE
-# If non-matching tables are checked, it signals an error.
-.checkExistingData <- function(conn, data, table) {
-  .assertDbConnect(conn, table)
-  dd <- .fetchDbTable(conn, table)
-  if (!nrow(dd))
-    return(FALSE)
-  dfnames <- names(data)
-  if ("id" %in% names(dd) && isFALSE("id" %in% dfnames))
-    dd$id <- NULL
-  if (!identical(dfnames, names(dd)))
-    stop(
-      sprintf("The column names in the table and the input data differ")
-    )
-  
-  # We bind a few rows of the data we want to input to the
-  # previously existing one. If there are any duplications, we
-  # can safely assume that the data are pre-existent.
-  if (anyDuplicated(data)) {
-    df <- unique(data)  # deal with duplicate records in original data
-    warning("Duplicate rows were found and removed") # TODO: Quantify.
-  }
-  dfx <- rbind(dd, head(df))
-  as.logical(anyDuplicated(dfx, fromLast = TRUE))
-}
-
-
-
-.fetchDbTable <- function(con, tbl) {
-  .assertDbConnect(con, tbl)
-  dbGetQuery(con, sprintf("SELECT * FROM %s;", tbl))
-}
-
-
-.assertDbConnect <- function(c, t) {
-  stopifnot(RSQLite::dbIsValid(c), is.character(t))
-}
-
-
-
-get_labels_via_rgx <- function(df, rgx) {
-  stopifnot(is.data.frame(df), is.character(rgx))
-  res <- get_var_labels(df, grep(rgx, names(df)))
-  # res <- res[!grepl("other", res, ignore.case = TRUE)]
-  res
-}
-
-
-
-prepare_ref_table <- function(variable, options, data = alldata) {
-  stopifnot(is.character(options), is.data.frame(data))
-  if (!variable %in% names(data))
-    stop(sQuote(variable), " is not a column name of 'data'")
-  pwd <- data[[variable]] |>
-    unique() |>
-    na.omit() |>
-    as.character() |>
-    factor(levels = options,
-           ordered = TRUE)
-  data.frame(id = sort(as.integer(pwd)), response = levels(pwd))
-}
-
-
-
-link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL) {
-  if (is.character(y))
-    y <- read_from_db(dbpath, y) # Note that this is an impure function. See def.
-  if (is.null(by.y)) 
-    by.y <- by.x
-  if (is.null(ref.col)) 
-    ref.col <- by.x
-  ndf <- 
-    merge(x, y, by.x = by.x, by.y = by.y, all = TRUE)
-  ndf[[by.x]] <- NULL
-  names(ndf)[match("id", names(ndf))] <- ref.col
-  ndf
-}
-
-
-
-create_multiresponse_group <-
-  function(rgx,
-           label.tbl,
-           bridge.tbl = NULL,
-           data = alldata) {
-    lbls <- get_labels_via_rgx(data, rgx)
-    if (is.null(lbls))
-      stop("There no labels for this group")
-    lbl.df <- data.frame(name = lbls)
-    print(try(append_to_db(lbl.df, label.tbl, dbpath)))
-    
-    if (is.null(bridge.tbl))
-      return(invisible())
-    
-    nlbl.df <- read_from_db(dbpath, label.tbl)
-    fac.lbl.df <- select(alldata, facility_id, matches(rgx))
-    names(fac.lbl.df) <- c("facility_id", lbls)
-    
-    df <- fac.lbl.df %>%
-      pivot_longer(2:last_col()) %>%
-      filter(value != 0L) %>%
-      left_join(nlbl.df, by = "name") %>%
-      select(-c(name, value)) %>%
-      rename(opt_id = id)
-    
-    try(append_to_db(df, bridge.tbl, dbpath))
-  }
-
-
-
-create_singleresponse_tbl <- function(col, tblname, data = alldata) {
-  stopifnot({
-    is.character(col)
-    is.character(tblname)
-    is.data.frame(data)
-  })
-  val <- if (length(col) > 1L) col else unique(data[[col]])
-  vals <- val |>
-    na.omit() |>
-    as.character()
-  df <- data.frame(name = vals)
-  
-  append_to_db(df, tblname, dbpath)
-}
-
-
-make_boolean <- function(x) {
-  stopifnot(is.character(x))
-  ifelse(x == "Yes", 1L, 0L)
-}
-
-
-
-filter_alldata <- function(service.col, selected, bools = NULL) {
-  require(rlang, quietly = TRUE)
-  srvcol <- enexpr(service.col)
-  ret <- alldata %>%
-    filter(!!srvcol == 1) %>%
-    select(facility_id, all_of(selected))
-  if (is.null(bools))
-    return(ret)
-  mutate(ret, across(all_of(bools), make_boolean))
-}
-
-
-
-
-drop_db_table <- function(tblname) {
-  stmt <- sprintf("DROP TABLE IF EXISTS %s;", tblname)
-  dbcon <- dbConnect(SQLite(), dbpath)
-  on.exit(dbDisconnect(dbcon))
-  
-  tryCatch({
-    cat("Dropping table", sQuote(tblname), "... ")
-    r <- dbSendQuery(dbcon, stmt)
-    dbClearResult(r)
-    cat("Done\n")
-  },
-  error = function(e) {
-    cat("Failed\n")
-    warning(conditionMessage(e))
-  })
-}
-
-
-
-# Project Data ----
 dbpath <- if (interactive()) {
   file.choose()
 } else {
   message("Using the NFWP database by default")
   params[2]
 }
-    
 
 states <- projOpts$states
-alldata <- states %>% 
-  lapply(\(x) {
-    # Old code used purrr::map_df. This workaround is used
-    # to circumvent a type disparity in the variable being
-    # transformed below.
-    d <- load_data(dbpath, x)
-    d <- transform(
-      d, 
-      descr_oth_sheltamen = as.character(descr_oth_sheltamen)
-    )
-  }) |>
-  bind_rows() |>
-  as_tibble()
+alldata <- combine_project_data(projOpts$name, projOpts$states, dbpath)
 
-var_label(alldata) <- var_label(load_data(dbpath, states[1]), unlist = TRUE)
+## Apply variable labels
+var_label(alldata) <- 
+  var_label(load_data(dbpath, states[1]), unlist = TRUE)  # TODO: Review this.
+
 var.rgx <- as.list(projOpts$regex)
 
 ## Some of the variable are converted to factors by `loadData`; we don't 
@@ -297,7 +74,11 @@ alldata <- alldata %>%
   mutate(facility_id = seq_len(nrow(.))) %>%  # we set this to reference other tables
   mutate(across(contains(factorvars), as.character))
 
+
+
 # Table operations ----
+# Change to app database
+dbpath <- here::here("app/data.db")
 
 ## We start by populating the Project and States tables
 proj <- data.frame(name = projOpts$name, year = projOpts$year)
@@ -306,7 +87,9 @@ try( append_to_db(proj, tbl = "Projects", dbpath) )
 local({
   tables <- c("States", "LGAs", "Devices")
   variables <- projOpts$vars[c("state", "lga", "device.id")]
-  invisible(Map(create_singleresponse_tbl, variables, tables))
+  invisible(
+    walk2(variables, tables, create_singleresponse_tbl, data = alldata)
+  )
 })
 
 # The Interviewers
@@ -452,8 +235,14 @@ local({
   )
   
   fields <- projOpts$vars[var.index]
-  invisible( Map(create_singleresponse_tbl, fields, tables) )
-  create_singleresponse_tbl(c("Always", "Sometimes", "Never"), "ReferralToOptions")
+  invisible(
+    walk2(fields, tables, create_singleresponse_tbl, data = alldata)
+  )
+  create_singleresponse_tbl(
+    c("Always", "Sometimes", "Never"), 
+    "ReferralToOptions",
+    alldata
+  )
   
   ## NB: `link_db_tables` can work with a table name OR a session data frame!
   last.element <- length(tables)
@@ -498,7 +287,6 @@ local({
   append_to_db(facdb, "Facility", dbpath)
 })
 
-
 local({
   rgx.index <-
     c(
@@ -528,7 +316,12 @@ local({
     )
   
   for (i in seq_along(rgx.index))
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+    create_multiresponse_group(
+      var.rgx[[rgx.index[i]]], 
+      tables[i], 
+      bridges[i], 
+      alldata
+    )
 })
 
 
@@ -568,7 +361,7 @@ local({
   health.cols <- unname(c("facility_id", varnames))
   booleans <- health.cols[c(6, 8, 11, 23)]
   
-  h.data <- filter_alldata(srvtype_health, health.cols, booleans)
+  h.data <- filter_alldata(alldata, srvtype_health, health.cols, booleans)
   
   rgx.index <-
     c("health.services",
@@ -592,14 +385,23 @@ local({
     )
   
   for (i in seq_along(tables))
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+    try(
+      create_multiresponse_group(
+        var.rgx[[rgx.index[i]]], 
+        tables[i], 
+        bridges[i], 
+        alldata)
+    )
   
   variables <- projOpts$vars[c("hf.type", "health.paid")]
   tables <- c("HfType", "CostOpts")
   ref.col <- c("hftype_id", "healthfees_id")
+  
   for (i in 1:2) {
-    create_singleresponse_tbl(variables[i], tables[i], h.data)
-    h.data <- link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
+    try({
+      create_singleresponse_tbl(variables[i], tables[i], h.data)
+      h.data <- link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
+    })
   }
   
   append_to_db(h.data, "Health", dbpath)
@@ -629,11 +431,12 @@ local({
   legcol <- unname(c("facility_id", varnames))
   booleans <- legcol[c(5, 12)]
   
-  l.data <- filter_alldata(srvtype_legal, legcol, booleans)
+  l.data <- filter_alldata(alldata, srvtype_legal, legcol, booleans)
   
   create_multiresponse_group(var.rgx[['legal.services']],
                              "LegalServices", 
-                             "LegalservicesFacility")
+                             "LegalservicesFacility",
+                             alldata)
   varnames <- unname(projOpts$vars['no.resources1'])
   create_singleresponse_tbl(varnames, "ActionNoresrc", l.data)
   
@@ -668,14 +471,14 @@ local({
     )
   varnames <- projOpts$vars[var.index]
   psy.col <- unname(c("facility_id", varnames))
-  psy.data <- filter_alldata(srvtype_psych, psy.col)
+  psy.data <- filter_alldata(alldata, srvtype_psych, psy.col)
 
   rgx.index <- c("psychosoc.services", "trained.psychosoc")
   tables <- c("PsychoServices", "PsychoTrain")
   bridges <- c("PsychoservicesFacility", "PsychotrainFacility")
   
   for (i in 1:2)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
   
   psy.data <-
     link_db_tables(psy.data, "CostOpts", "psych_fees", "name", "psychfees_id")
@@ -712,7 +515,7 @@ local({
   varnames <- projOpts$vars[var.index]
   pol.col <- unname(c("facility_id", varnames))
   booleans <- pol.col[c(3, 5, 19)]
-  pol.data <- filter_alldata(srvtype_police, pol.col, booleans)
+  pol.data <- filter_alldata(alldata, srvtype_police, pol.col, booleans)
   
   rgx.index <-
     c("police.services", "trained.police", "resources.police")
@@ -723,7 +526,7 @@ local({
       "PoliceresourcesFacility")
   
   for (i in 1:3)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
   
   pol.data <-
     link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id")
@@ -754,7 +557,7 @@ local({
   varnames <- unname(projOpts$vars[var.index])
   shel.col <- c("facility_id", varnames)
   booleans <- shel.col[c(4:5, 11:12)]
-  shel.data <- filter_alldata(srvtype_shelt, shel.col, booleans)
+  shel.data <- filter_alldata(alldata, srvtype_shelt, shel.col, booleans)
   
   rgx.index <- 
     c("shelter.services", "privacy.shelter", "amenities.shelter")
@@ -765,7 +568,7 @@ local({
       "ShelteramenitiesFacility")
   
   for (i in 1:3)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i])
+    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
   
   varname <- unname(projOpts$vars['electricwater'])
   elec.tbl <- "ElectricWater"
@@ -791,11 +594,12 @@ local({
   varnames <- projOpts$vars[var.index]
   econ.col <- unname(c("facility_id", varnames))
   booleans <- econ.col[4:5]
-  econ.data <- filter_alldata(srvtype_econ, econ.col, booleans)
+  econ.data <- filter_alldata(alldata, srvtype_econ, econ.col, booleans)
   
   create_multiresponse_group(var.rgx[['economic.services']],
                              "EconServices",
-                             "EconservicesFacility")
+                             "EconservicesFacility",
+                             alldata)
   
   append_to_db(econ.data, "Economic", dbpath)
 })

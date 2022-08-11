@@ -3,14 +3,16 @@
 R_EXE="Rscript.exe"
 sql_dir=$(dirname $(realpath $0))
 
-# Move into the project directory
+# Move into sub-directory
 cd $sql_dir
 rm -f *.db
 
 cd ../..
+# TODO: check if .Rproj file exists
 proj_dir=$(pwd)
 
 cd ../NFWP
+# TODO: Check if .Rprof file exists
 nfwp_dir=$(pwd)
 
 # Bootstrap package environment
@@ -20,7 +22,7 @@ nfwp_dir=$(pwd)
 # $R_EXE -e "library(renv); renv::autoload()"
 
 # Create/update the NFWP database
-# echo "Creating the NFWP database"
+echo "Copying the NFWP database"
 nfwp_db=$nfwp_dir/data/nfwp.db 
 # rm $nfwp_db
 # 
@@ -42,15 +44,13 @@ sqlite3 $app_db < create.sql
 
 # Populate the tables with the data
 echo "Initializing the database"
-cd $nfwp_dir
-"$R_EXE" $sql_dir/initdb.R . $app_db
+"$R_EXE" initdb.R $nfwp_dir $app_db
 
 # Create views
 echo "Creating the database views"
-cd $sql_dir
 sqlite3 $app_db < views.sql
 
 echo "Installing the database"
-mv $app_db ../../app
+mv $app_db $proj_dir/app
 
 cd $proj_dir
