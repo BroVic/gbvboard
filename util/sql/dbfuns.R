@@ -6,6 +6,7 @@ loadData <-
            type = c("services", "capacity")) {
     stopifnot(length(state) == 1, is.character(state))
     type <- match.arg(type)
+    
     try({
       con <- RSQLite::dbConnect(RSQLite::SQLite(), dbpath)
       on.exit(RSQLite::dbDisconnect(con))
@@ -31,12 +32,15 @@ append_to_db <- function(df, tbl, db) {
         tbl
       ), call. = FALSE)
     }
+    
     tryCatch({
       old <- .fetchDbTable(con, tbl)
+      
       if (nrow(old))
         dbAppendTable(con, tbl, df)
       else
         dbWriteTable(con, tbl, df, append = TRUE)
+      
       message("Done")
     },
     error = function(e) {
@@ -56,12 +60,17 @@ append_to_db <- function(df, tbl, db) {
 # If non-matching tables are checked, it signals an error.
 .checkExistingData <- function(conn, data, table) {
   .assertDbConnect(conn, table)
+  
   dd <- .fetchDbTable(conn, table)
+  
   if (!nrow(dd))
     return(FALSE)
+  
   dfnames <- names(data)
+  
   if ("id" %in% names(dd) && isFALSE("id" %in% dfnames))
     dd$id <- NULL
+  
   if (!identical(dfnames, names(dd)))
     stop(
       sprintf("The column names in the table and the input data differ")
@@ -74,6 +83,7 @@ append_to_db <- function(df, tbl, db) {
     data <- unique(data)  # deal with duplicate records in original data
     warning("Duplicate rows were found and removed") # TODO: Quantify.
   }
+  
   dfx <- rbind(dd, head(data))
   as.logical(anyDuplicated(dfx, fromLast = TRUE))
 }
@@ -103,14 +113,17 @@ get_labels_via_rgx <- function(df, rgx) {
 
 prepare_ref_table <- function(variable, options, data = alldata) {
   stopifnot(is.character(options), is.data.frame(data))
+  
   if (!variable %in% names(data))
     stop(sQuote(variable), " is not a column name of 'data'")
+  
   pwd <- data[[variable]] |>
     unique() |>
     na.omit() |>
     as.character() |>
     factor(levels = options,
            ordered = TRUE)
+  
   data.frame(id = sort(as.integer(pwd)), response = levels(pwd))
 }
 
@@ -119,14 +132,19 @@ prepare_ref_table <- function(variable, options, data = alldata) {
 link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL) {
   if (is.character(y))
     y <- read_from_db(dbpath, y) # Note that this is an impure function. See def.
+  
   if (is.null(by.y)) 
     by.y <- by.x
+  
   if (is.null(ref.col)) 
     ref.col <- by.x
+  
   ndf <- 
     merge(x, y, by.x = by.x, by.y = by.y, all = TRUE)
+  
   ndf[[by.x]] <- NULL
   names(ndf)[match("id", names(ndf))] <- ref.col
+  
   ndf
 }
 
@@ -138,8 +156,10 @@ create_multiresponse_group <-
            bridge.tbl = NULL,
            data) {
     lbls <- get_labels_via_rgx(data, rgx)
+    
     if (is.null(lbls))
       stop("There no labels for this group")
+    
     lbl.df <- data.frame(name = lbls)
     print(try(append_to_db(lbl.df, label.tbl, dbpath)))
     
@@ -168,10 +188,16 @@ create_singleresponse_tbl <- function(col, tblname, data) {
     is.character(tblname)
     is.data.frame(data)
   })
-  val <- if (length(col) > 1L) col else unique(data[[col]])
+  
+  val <- if (length(col) > 1L)
+    col
+  else
+    unique(data[[col]])
+  
   vals <- val |>
     na.omit() |>
     as.character()
+  
   df <- data.frame(name = vals)
   
   append_to_db(df, tblname, dbpath)
@@ -187,14 +213,19 @@ make_boolean <- function(x) {
 
 filter_alldata <- function(data, service.col, selected, bools = NULL) {
   require(rlang, quietly = TRUE)
+  
   if (!is.data.frame(data))
     stop("'data' must be a data frame")
+  
   srvcol <- enexpr(service.col)
+  
   ret <- data %>%
     filter(!!srvcol == 1) %>%
     select(facility_id, all_of(selected))
+  
   if (is.null(bools))
     return(ret)
+  
   mutate(ret, across(all_of(bools), make_boolean))
 }
 
@@ -226,8 +257,11 @@ transform_mismatched <- function(data, projectname) {
     is.data.frame(data)
     is.character(projectname)
   })
+  
   tryCatch({
+    
     within(data, {
+  
       if (projectname == "NFWP") {
         policefee_case = as.double(policefee_case)
         policefee_safety = as.double(policefee_safety)
@@ -257,7 +291,8 @@ transform_mismatched <- function(data, projectname) {
       else
         stop("No project called ", sQuote(projectname))
     })
-  }, error = function(e) {
+  }, 
+  error = function(e) {
     warning(conditionMessage(e), call. = FALSE)
     data
   })
@@ -271,10 +306,13 @@ transform_mismatched <- function(data, projectname) {
 # Activates focus project by applying the project options,
 # returning them for use in this project
 get_project_options <- function(dir, reset = FALSE) {
+  
   if (!dir.exists(dir))
     stop("No directory ", sQuote(dir), " found")
+  
   if (!is.logical(reset))
     stop("'reset' must be a logical value")
+  
   curr.opts <- options()
   source(file.path(dir, ".Rprofile"), chdir = TRUE)
   
@@ -294,6 +332,7 @@ get_project_options <- function(dir, reset = FALSE) {
     options(curr.opts)
   
   renv::load(quiet = TRUE)
+  
   jOpts
 }
 
@@ -301,33 +340,47 @@ get_project_options <- function(dir, reset = FALSE) {
 
 
 combine_project_data <- function(name, states, database) {
-  require(dplyr, quietly = TRUE)
+  require(dplyr, warn.conflicts = FALSE)
+  
   states |>
     lapply(function(s) {
-      d <- loadData(database, s) |>
+      
+      df <- loadData(database, s) |>
         lapply(function(c) {
+          
           if (all(is.na(c)))
             rep(NA_character_, length(c))
           else
             c
+          
         }) |>
         bind_cols()
-      transform_mismatched(d, name)
+      
+      transform_mismatched(df, name)
+      
     }) |>
     bind_rows() |>
     as_tibble()
 }
 
 
+
+
 inspect_data <- function(base, new) {
+  
   lapply(names(base), function(name) {
     bcol <- base[[name]]
+    
     if (!is.character(bcol))
       return()
+    
     bval <- unique(bcol)
     nval <- unique(new[[name]])
-    cat("Base:", paste(bval, collapse = "\n"), fill = TRUE)
-    cat("New:", paste(nval, collapse = "\n"))
-    readline()
+    
+    cat("Variable:\n")
+    cat("* Base:", paste(bval, collapse = "\n"), fill = TRUE)
+    cat("* New:", paste(nval, collapse = "\n"))
+    
+    readline("Press any ENTER... ")
   }) 
 }
