@@ -17,6 +17,34 @@ loadData <-
   }
 
 
+
+
+# Runs an SQL query on the database, generically.
+query_db <- function(db, qry)
+{
+  if (!file.exists(db))
+    stop("'db' does not exist")
+  if (!is.character(qry) || length(qry) > 1L)
+    stop("'qry' must be a character vector of length 1")
+  require(RSQLite)
+  tryCatch({
+    dbcon <- dbConnect(SQLite(), db)
+    r <- dbSendStatement(dbcon, qry)
+    res <- dbFetch(r)
+  },
+  error = function(e)
+    stop(e, call. = FALSE),
+  finally = {
+    if (exists('r', envir = environment()))
+      dbClearResult(r)
+    dbDisconnect(dbcon)
+  })
+  invisible(res)
+}
+
+
+
+
 # Appends data to already created database tables
 append_to_db <- function(df, tbl, db) {
   require(RSQLite, quietly = TRUE)
@@ -154,19 +182,20 @@ create_multiresponse_group <-
   function(rgx,
            label.tbl,
            bridge.tbl = NULL,
-           data) {
+           data,
+           db) {
     lbls <- get_labels_via_rgx(data, rgx)
     
     if (is.null(lbls))
       stop("There no labels for this group")
     
     lbl.df <- data.frame(name = lbls)
-    print(try(append_to_db(lbl.df, label.tbl, dbpath)))
+    print(append_to_db(lbl.df, label.tbl, db))
     
     if (is.null(bridge.tbl))
       return(invisible())
     
-    nlbl.df <- read_from_db(dbpath, label.tbl)
+    nlbl.df <- read_from_db(db, label.tbl)
     fac.lbl.df <- select(data, facility_id, matches(rgx))
     names(fac.lbl.df) <- c("facility_id", lbls)
     
@@ -177,12 +206,12 @@ create_multiresponse_group <-
       select(-c(name, value)) %>%
       rename(opt_id = id)
     
-    try(append_to_db(df, bridge.tbl, dbpath))
+    append_to_db(df, bridge.tbl, db)
   }
 
 
 
-create_singleresponse_tbl <- function(col, tblname, data) {
+create_singleresponse_tbl <- function(col, tblname, data, db) {
   stopifnot({
     is.character(col)
     is.character(tblname)
@@ -200,14 +229,68 @@ create_singleresponse_tbl <- function(col, tblname, data) {
   
   df <- data.frame(name = vals)
   
-  append_to_db(df, tblname, dbpath)
+  append_to_db(df, tblname, db)
 }
+
+
+
+# Converts a column with categorical variables into one that has
+# integer values, referencing a corresponding table from the database
+create_reference_col <- function(colname, tblname, data, db) {
+  tab <- jGBV::read_from_db(db, tblname) |>
+    dplyr::arrange(id)
+  
+  col <- data[[colname]]
+  isFactor <- inherits(col, "factor")
+  
+  dfcats <-
+    if (isFactor)
+      levels(col)
+  else
+    unique(col)
+  
+  dbcats <- tab$name
+  
+  if (!identical(dfcats, dbcats)) {
+    message(sQuote(colname),
+            " was returned unchanged because of a category mismatch")
+   
+    while (TRUE) {
+      y <- -1L
+      x <- menu(dfcats, title = "Value to be replaced: ")
+      x.val <- dfcats[x]
+      
+      if (x) {
+        prompt <- sprintf("Value to replace %s with: ", sQuote(x.val))
+        y <- menu(dbcats, title = prompt)
+      }
+      
+      if (!x || !y) {
+        message("Exited menu-based editing")
+        break
+      }
+      
+      y.val <- dbcats[y]
+      col[col %in% x.val] <- y.val
+      dfcats <- dfcats[-x]
+    }
+  }
+
+  if (!isFactor)
+    col <- factor(col, dbcats)
+  
+  as.integer(col)
+}
+
+
 
 
 make_boolean <- function(x) {
   stopifnot(is.character(x))
   ifelse(x == "Yes", 1L, 0L)
 }
+
+
 
 
 
@@ -377,9 +460,10 @@ inspect_data <- function(base, new) {
     bval <- unique(bcol)
     nval <- unique(new[[name]])
     
-    cat("Variable:\n")
-    cat("* Base:", paste(bval, collapse = "\n"), fill = TRUE)
-    cat("* New:", paste(nval, collapse = "\n"))
+    lbrk <- "\n"
+    cat(sprintf("Variable: %s%s", name, lbrk))
+    cat("* Base:", paste(bval, collapse = lbrk), sep = lbrk, fill = TRUE)
+    cat("* New:", paste(nval, collapse = lbrk), sep = lbrk)
     
     readline("Press any ENTER... ")
   }) 

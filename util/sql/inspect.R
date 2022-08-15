@@ -7,3 +7,4 @@ nfwpData <- combine_project_data(nfwpOpts$name, nfwpOpts$states, "../NFWP/data/n
 nedcData <- combine_project_data(nedcOpts$name, nedcOpts$states, "../NEDC/data/nedc.db")
 
 inspect_data(nfwpData, nedcData)
+
