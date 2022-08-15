@@ -12,8 +12,10 @@ here::i_am(script.path <- "util/sql/initdb.R")
 suppressPackageStartupMessages(library(here))
 
 helperfile <- "dbfuns.R"
+
 if (getwd() == here())
   helperfile <- file.path(dirname(script.path), helperfile)
+
 source(helperfile)
 
 library(tidyr)
@@ -24,6 +26,7 @@ library(dplyr, warn.conflicts = FALSE)
 
 
 # Project Data ----
+## Fetch inputs
 params <- commandArgs(trailingOnly = TRUE)
 
 dir <- if (interactive()) {
@@ -41,7 +44,7 @@ if (!dir.exists(dir))
   stop("Directory", sQuote(dir), "does not exist")
 dir <- normalizePath(dir, winslash = "/")
 
-projOpts <- get_project_options(dir)
+opts <- get_project_options(dir)
 
 dbpath <- if (interactive()) {
   file.choose()
@@ -50,54 +53,72 @@ dbpath <- if (interactive()) {
   params[2]
 }
 
-states <- projOpts$states
-alldata <- combine_project_data(projOpts$name, projOpts$states, dbpath)
+## Fetch the data
+states <- opts$states
+alldata <- combine_project_data(opts$name, opts$states, dbpath)
 
 ## Apply variable labels
 var_label(alldata) <- 
   var_label(load_data(dbpath, states[1]), unlist = TRUE)  # TODO: Review this.
 
-var.rgx <- as.list(projOpts$regex)
+var.rgx <- as.list(opts$regex)
 
 ## Some of the variable are converted to factors by `loadData`; we don't 
 ## want this for the purposes of creating the database.
 factorvars <-
-  projOpts$vars[c("start",
-                  "end",
-                  "today",
-                  "opstart",
-                  "gbvstart",
-                  "age",
-                  "update.refdir")]
+  opts$vars[c("start",
+              "end",
+              "today",
+              "opstart",
+              "gbvstart",
+              "age",
+              "update.refdir")]
 
+
+# Get the primary key i.e. the ID column from the 'Facility' table in the 
+# database and apply it to the main data frame, so that it can be used as
+# a reference in subsequent operations. 
+
+# Change to app database
+dbpath <- here::here("app/data.db")
+nrw <- query_db(dbpath, "SELECT MAX(facility_id) FROM Facility;")[1, 1]
+
+if (is.na(nrw))
+  nrw <- 0L
+  
 alldata <- alldata %>%
-  mutate(facility_id = seq_len(nrow(.))) %>%  # we set this to reference other tables
+  mutate(facility_id = nrw + seq(nrow(.))) %>%  # we set this to reference other tables
   mutate(across(contains(factorvars), as.character))
 
 
 
 # Table operations ----
-# Change to app database
-dbpath <- here::here("app/data.db")
 
 ## We start by populating the Project and States tables
-proj <- data.frame(name = projOpts$name, year = projOpts$year)
+proj <- data.frame(name = opts$name, year = opts$year)
 try( append_to_db(proj, tbl = "Projects", dbpath) )
 
 local({
   tables <- c("States", "LGAs", "Devices")
-  variables <- projOpts$vars[c("state", "lga", "device.id")]
+  variables <- opts$vars[c("state", "lga", "device.id")]
   invisible(
-    walk2(variables, tables, create_singleresponse_tbl, data = alldata)
+    walk2(variables,
+          tables,
+          create_singleresponse_tbl,
+          data = alldata,
+          db = dbpath)
   )
 })
 
 # The Interviewers
 local({
-  ivars <- projOpts$vars
-  interviewer <- alldata[, c(ivars['interviewer'], ivars['interviewer.contact'])]
+  ivars <- opts$vars
+  interviewer <- alldata[, ivars[c('interviewer', 'interviewer.contact')]]
   interviewer <- interviewer[!duplicated(interviewer[[1L]]), ]
   names(interviewer) <- c("name", "contact")
+  proj <- read_from_db(dbpath, "Projects")
+  proj.id <- proj$id[proj$name == opts$name]
+  interviewer$proj_id <- proj.id
   append_to_db(interviewer, "Interviewer", dbpath)
 })
 
@@ -193,14 +214,18 @@ local({
       "comment.coord",
       "service.othersdetail"
     )
-  varnames <- unname(projOpts$vars[var.index])
+  
+  varnames <- unname(opts$vars[var.index])
   facilcol <- c("facility_id", varnames)
   
   # Convert Y/N variables to binary values
-  bools <- c(38, 43:44, 46, 52:53, 56:57, 60:63, 65, 69, 81, 84) + 1
+  # We have added one column to account for the 'facility_id' that was
+  # added after the position of the booleans that were manually identified
+  # from the variable list.
+  bools <- c(38, 43:44, 46, 52:53, 56:57, 60:63, 65, 69, 81, 84) + 1L
   bools <- facilcol[bools]
   
-  facdb <- alldata %>% 
+  facility.df <- alldata %>% 
     select(all_of(facilcol)) %>% 
     mutate(across(all_of(bools), make_boolean))
   
@@ -219,7 +244,7 @@ local({
       "ChooseTreatment",
       "ShowDocs"
     )
-  var.index <- c(
+  factor.indx <- c(
     "age",
     "org.type", 
     "open.247",
@@ -234,24 +259,33 @@ local({
     "showed.docs"
   )
   
-  fields <- projOpts$vars[var.index]
-  invisible(
-    walk2(fields, tables, create_singleresponse_tbl, data = alldata)
-  )
-  create_singleresponse_tbl(
-    c("Always", "Sometimes", "Never"), 
-    "ReferralToOptions",
-    alldata
-  )
+  cat.vars <- opts$vars[factor.indx]
+  
+  if (opts$name == "NFWP") {
+    invisible(
+      walk2(cat.vars,
+            tables,
+            create_singleresponse_tbl,
+            data = alldata,
+            db = dbpath)
+    )
+    
+    create_singleresponse_tbl(
+      c("Always", "Sometimes", "Never"), 
+      "ReferralToOptions",
+      alldata,
+      dbpath
+    )
+  }
   
   ## NB: `link_db_tables` can work with a table name OR a session data frame!
   last.element <- length(tables)
   tables <- tables[-last.element]
-  var.index <- var.index[-last.element]
+  factor.indx <- factor.indx[-last.element]
   
-  var.index <- c(var.index, "state", "lga", "device.id")
+  factor.indx <- c(factor.indx, "state", "lga", "device.id")
   y.tables <- c(tables, "States", "LGAs", "Devices")
-  by.x <- unname(projOpts$vars[var.index])
+  by.x <- unname(opts$vars[factor.indx])
   ref.col <-
     c(
       "agegrp_id",
@@ -270,21 +304,48 @@ local({
       "device_id"
     )
   
-  for (i in seq_along(y.tables))
-    facdb <- link_db_tables(facdb, y.tables[i], by.x[i], "name", ref.col[i])
+  if (opts$name == "NFWP") {
+    for (i in seq_along(y.tables)) {
+      facility.df <-
+        link_db_tables(facility.df, y.tables[i], by.x[i], "name", ref.col[i])
+    }
+  }
+  else {
+    args <- data.frame(var = by.x, tbl = y.tables, refcol = ref.col)
+    
+    for(i in seq(nrow(args))) {
+      x <- args$var[i]
+      y <- args$tbl[i]
+      ind <- match(x, names(facility.df))
+      
+      if (length(ind) > 1L)
+        stop(sQuote(x, " matches more than one column in the data"))
+      
+      facility.df[[ind]] <- create_reference_col(x, y, facility.df, dbpath)
+      names(facility.df)[ind] <- args$refcol[i]
+    }
+  }
+  
   
   # Merge reference tables with main one via their respective PK IDs
   interviewer.db <- read_from_db(dbpath, "Interviewer")
   interviewer.db$contact <- NULL  # column not needed for referencing
-  facdb <-
-    link_db_tables(facdb, interviewer.db, "interviewer_name", "name", "interviewer_id")
+  
+  if (opts$name != "NFWP") {
+    !(interviewer.db$name %in% facility.df$interviewer_name)
+  }
+    
+  facility.df <-
+    link_db_tables(facility.df, interviewer.db, "interviewer_name", "name", "interviewer_id")
   
   # For those variables for "referrals to" i.e. always/sometimes/never
-  for(i in grep("^refto_", names(alldata), value = TRUE))
-    facdb <- 
-      link_db_tables(facdb, "ReferralToOptions", i, "name", paste0(i, "_id"))
+  for(i in grep("^refto_", names(alldata), value = TRUE)) {
+    refname <- paste0(i, "_id")
+    facility.df <-
+      link_db_tables(facility.df, "ReferralToOptions", i, "name", refname)
+  }
   
-  append_to_db(facdb, "Facility", dbpath)
+  append_to_db(facility.df, "Facility", dbpath)
 })
 
 local({
@@ -315,13 +376,10 @@ local({
       "ServicetypeFacility"
     )
   
-  for (i in seq_along(rgx.index))
-    create_multiresponse_group(
-      var.rgx[[rgx.index[i]]], 
-      tables[i], 
-      bridges[i], 
-      alldata
-    )
+  for (i in seq_along(rgx.index)) {
+    col <- var.rgx[[rgx.index[i]]]
+    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+  }
 })
 
 
@@ -357,7 +415,7 @@ local({
       "oth.hlthtrain.dscrb",
       "qual.staff"
     )
-  varnames <- projOpts$vars[var.index]
+  varnames <- opts$vars[var.index]
   health.cols <- unname(c("facility_id", varnames))
   booleans <- health.cols[c(6, 8, 11, 23)]
   
@@ -384,22 +442,20 @@ local({
       "TrainedHealthFacility"
     )
   
-  for (i in seq_along(tables))
+  for (i in seq_along(tables)) {
+    col <- var.rgx[[rgx.index[i]]]
     try(
-      create_multiresponse_group(
-        var.rgx[[rgx.index[i]]], 
-        tables[i], 
-        bridges[i], 
-        alldata)
+      create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
     )
+  }
   
-  variables <- projOpts$vars[c("hf.type", "health.paid")]
+  variables <- opts$vars[c("hf.type", "health.paid")]
   tables <- c("HfType", "CostOpts")
   ref.col <- c("hftype_id", "healthfees_id")
   
   for (i in 1:2) {
     try({
-      create_singleresponse_tbl(variables[i], tables[i], h.data)
+      create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
       h.data <- link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
     })
   }
@@ -427,7 +483,7 @@ local({
       "no.resources1",             # FK
       "no.resources2"
     )
-  varnames <- projOpts$vars[var.index]
+  varnames <- opts$vars[var.index]
   legcol <- unname(c("facility_id", varnames))
   booleans <- legcol[c(5, 12)]
   
@@ -436,14 +492,15 @@ local({
   create_multiresponse_group(var.rgx[['legal.services']],
                              "LegalServices", 
                              "LegalservicesFacility",
-                             alldata)
-  varnames <- unname(projOpts$vars['no.resources1'])
-  create_singleresponse_tbl(varnames, "ActionNoresrc", l.data)
+                             alldata,
+                             dbpath)
+  varnames <- unname(opts$vars['no.resources1'])
+  create_singleresponse_tbl(varnames, "ActionNoresrc", l.data, dbpath)
   
   tables <- c("CostOpts", "ActionNoresrc")
   var.index <- c("legal.paid", "no.resources1")
   ref.col <- c("legalfees_id", "noresource1_id")
-  varnames <- unname(projOpts$vars[var.index])
+  varnames <- unname(opts$vars[var.index])
   
   for (i in 1:2)
     l.data <- link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i])
@@ -469,7 +526,7 @@ local({
       "oth.psychtrain.dscrb",
       "qualstaff.id"
     )
-  varnames <- projOpts$vars[var.index]
+  varnames <- opts$vars[var.index]
   psy.col <- unname(c("facility_id", varnames))
   psy.data <- filter_alldata(alldata, srvtype_psych, psy.col)
 
@@ -477,9 +534,10 @@ local({
   tables <- c("PsychoServices", "PsychoTrain")
   bridges <- c("PsychoservicesFacility", "PsychotrainFacility")
   
-  for (i in 1:2)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
-  
+  for (i in 1:2) {
+    col <- var.rgx[[rgx.index[i]]]
+    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+  }
   psy.data <-
     link_db_tables(psy.data, "CostOpts", "psych_fees", "name", "psychfees_id")
   
@@ -512,7 +570,7 @@ local({
       "police.followup",            # bool
       "police.confidential"
     )
-  varnames <- projOpts$vars[var.index]
+  varnames <- opts$vars[var.index]
   pol.col <- unname(c("facility_id", varnames))
   booleans <- pol.col[c(3, 5, 19)]
   pol.data <- filter_alldata(alldata, srvtype_police, pol.col, booleans)
@@ -525,9 +583,10 @@ local({
       "TrainedpoliceFacility",
       "PoliceresourcesFacility")
   
-  for (i in 1:3)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
-  
+  for (i in 1:3) {
+    col <- var.rgx[[rgx.index[i]]]
+    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+  }
   pol.data <-
     link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id")
   
@@ -554,7 +613,7 @@ local({
       "shelter.support",            # bool
       "shelter.new.support"         # bool
     )
-  varnames <- unname(projOpts$vars[var.index])
+  varnames <- unname(opts$vars[var.index])
   shel.col <- c("facility_id", varnames)
   booleans <- shel.col[c(4:5, 11:12)]
   shel.data <- filter_alldata(alldata, srvtype_shelt, shel.col, booleans)
@@ -567,12 +626,13 @@ local({
       "ShelterprivacyFacility",
       "ShelteramenitiesFacility")
   
-  for (i in 1:3)
-    create_multiresponse_group(var.rgx[[rgx.index[i]]], tables[i], bridges[i], alldata)
-  
-  varname <- unname(projOpts$vars['electricwater'])
+  for (i in 1:3) {
+    col <- var.rgx[[rgx.index[i]]]
+    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+  }
+  varname <- unname(opts$vars['electricwater'])
   elec.tbl <- "ElectricWater"
-  create_singleresponse_tbl(varname, elec.tbl, shel.data)
+  create_singleresponse_tbl(varname, elec.tbl, shel.data, dbpath)
   
   shel.data <-
     link_db_tables(shel.data, elec.tbl, varname, "name", "elecwater_id")
@@ -591,7 +651,7 @@ local({
       "econ.areas",               # bool
       "econ.reject"               # bool
     )
-  varnames <- projOpts$vars[var.index]
+  varnames <- opts$vars[var.index]
   econ.col <- unname(c("facility_id", varnames))
   booleans <- econ.col[4:5]
   econ.data <- filter_alldata(alldata, srvtype_econ, econ.col, booleans)
@@ -599,7 +659,8 @@ local({
   create_multiresponse_group(var.rgx[['economic.services']],
                              "EconServices",
                              "EconservicesFacility",
-                             alldata)
+                             alldata,
+                             dbpath)
   
   append_to_db(econ.data, "Economic", dbpath)
 })
