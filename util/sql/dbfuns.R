@@ -99,7 +99,7 @@ append_to_db <- function(df, tbl, db) {
   if ("id" %in% names(dd) && isFALSE("id" %in% dfnames))
     dd$id <- NULL
   
-  if (!identical(dfnames, names(dd)))
+  if (!all(dfnames %in% names(dd)))
     stop(
       sprintf("The column names in the table and the input data differ")
     )
@@ -236,7 +236,14 @@ create_singleresponse_tbl <- function(col, tblname, data, db) {
 
 # Converts a column with categorical variables into one that has
 # integer values, referencing a corresponding table from the database
-create_reference_col <- function(colname, tblname, data, db) {
+create_reference_col <-
+  function(colname,
+           tblname,
+           data,
+           db,
+           scrub = NULL,
+           manual = FALSE
+  ) {
   tab <- jGBV::read_from_db(db, tblname) |>
     dplyr::arrange(id)
   
@@ -252,33 +259,42 @@ create_reference_col <- function(colname, tblname, data, db) {
   dbcats <- tab$name
   
   if (!identical(dfcats, dbcats)) {
-    message(sQuote(colname),
-            " was returned unchanged because of a category mismatch")
-   
-    while (TRUE) {
-      y <- -1L
-      x <- menu(dfcats, title = "Value to be replaced: ")
-      x.val <- dfcats[x]
-      
-      if (x) {
-        prompt <- sprintf("Value to replace %s with: ", sQuote(x.val))
-        y <- menu(dbcats, title = prompt)
+    if (manual) {
+      scrub <- NULL
+      while (TRUE) {
+        y <- -1L
+        x <- menu(dfcats, title = "Value to be replaced: ")
+        
+        if (x) {
+          prompt <- sprintf("Value to replace %s with: ", sQuote(x.val))
+          y <- menu(dbcats, title = prompt)
+        }
+        
+        if (!x || !y) {
+          message("Exited menu-based editing")
+          break
+        }
+        
+        x.val <- dfcats[x]
+        col[col %in% x.val] <- dbcats[y]
+        dfcats <- dfcats[-x]
       }
-      
-      if (!x || !y) {
-        message("Exited menu-based editing")
-        break
+    }
+    if (!is.null(scrub)) {
+      for (i in seq(nrow(scrub))) {
+        pat <- scrub[i, 1]
+        rep <- scrub[i, 2]
+        
+        if (pat == "" && rep == "")
+          next
+        
+        message("Replacing ", sQuote(pat), " with ", sQuote(rep))
+        col <- gsub(pat, rep, col)
       }
-      
-      y.val <- dbcats[y]
-      col[col %in% x.val] <- y.val
-      dfcats <- dfcats[-x]
     }
   }
-
   if (!isFactor)
     col <- factor(col, dbcats)
-  
   as.integer(col)
 }
 
@@ -467,4 +483,75 @@ inspect_data <- function(base, new) {
     
     readline("Press any ENTER... ")
   }) 
+}
+
+
+scrublist <- function() {
+  list(
+    cbind(
+      c(
+        "adults_and_children",
+        "only_adults__18_and_over",
+        "only_children__under_18"
+      ),
+      c("Adults and children", "Only adults", "Only children")
+    ),
+    cbind(
+      c(
+        "governmental__please_specify_m|Governmental (Please specify ministry or service)",
+        "international_ngo",
+        "other__describe",
+        "faith_based_organization",
+        "national_ngo",
+        "community_based_organization"
+      ),
+      c(
+        "Governmental ",
+        "International NGO",
+        "Other",
+        "Faith-based organization",
+        "National NGO",
+        "Community-based organization"
+      )
+    ),
+    cbind(
+      c("yes__open_24_7", "no__only_open_during_certain_h"),
+      c("Yes, open 24/7", "No, only open during certain hours")
+    ),
+    cbind("^No.*$", "No, respondent is unable to show them"),
+    cbind(
+      c(
+        "only_physical_data_are_stored",
+        "both_electronic_and_physical_s",
+        "only_electronic_storage_of_dat"
+      ),
+      c(
+        "Only physical data are stored",
+        "Both electronic and physical storage of data",
+        "Only electronic storage of data"
+      )
+    ),
+    cbind("Don_t_know", "Don't Know"),
+    cbind("", ""),
+    cbind("^Yes.*$", "Yes, always"),
+    cbind("", ""),
+    cbind(
+      c(
+        "every_six_months_or_less",
+        "it_has_never_been_updated",
+        "every_year",
+        "more_than_a_year"
+      ),
+      c(
+        "Every six months or less",
+        "It has never been updated",
+        "Every year",
+        "More than a year"
+      )
+    ),
+    cbind("Don_t_know", "Don't Know"),
+    cbind("", ""),
+    cbind("", ""),
+    cbind("", "")
+  )
 }

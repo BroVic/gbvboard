@@ -37,11 +37,13 @@ dir <- if (interactive()) {
 } else {
   params[1]
 }
+
 if (is.na(dir) || identical(dir, ""))
   stop("No project directory chosen")
 
 if (!dir.exists(dir))
   stop("Directory", sQuote(dir), "does not exist")
+
 dir <- normalizePath(dir, winslash = "/")
 
 opts <- get_project_options(dir)
@@ -81,6 +83,10 @@ factorvars <-
 
 # Change to app database
 dbpath <- here::here("app/data.db")
+
+if (!file.exists(dbpath))
+  stop(sQuote(dbpath), " does not exist")
+
 nrw <- query_db(dbpath, "SELECT MAX(facility_id) FROM Facility;")[1, 1]
 
 if (is.na(nrw))
@@ -101,6 +107,11 @@ try( append_to_db(proj, tbl = "Projects", dbpath) )
 local({
   tables <- c("States", "LGAs", "Devices")
   variables <- opts$vars[c("state", "lga", "device.id")]
+  
+  if (opts$name == "NEDC") {
+    alldata <- 
+      transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
+  }
   invisible(
     walk2(variables,
           tables,
@@ -294,8 +305,8 @@ local({
       "docsareshown_id",
       "datastorage_id",
       "privateques_id",
-      "datastorage_id",
-      "elecstore_id", 
+      "elecstore_id",
+      "contactauth_id",
       "signedcoc_id",
       "updates_id",
       "choosetreat_id",
@@ -312,6 +323,7 @@ local({
   }
   else {
     args <- data.frame(var = by.x, tbl = y.tables, refcol = ref.col)
+    scrubs <- scrublist()
     
     for(i in seq(nrow(args))) {
       x <- args$var[i]
@@ -321,22 +333,28 @@ local({
       if (length(ind) > 1L)
         stop(sQuote(x, " matches more than one column in the data"))
       
-      facility.df[[ind]] <- create_reference_col(x, y, facility.df, dbpath)
+      facility.df[[ind]] <- 
+        create_reference_col(x, y, facility.df, dbpath, scrub = scrubs[i])
       names(facility.df)[ind] <- args$refcol[i]
     }
   }
   
   
   # Merge reference tables with main one via their respective PK IDs
-  interviewer.db <- read_from_db(dbpath, "Interviewer")
-  interviewer.db$contact <- NULL  # column not needed for referencing
+  all.interviewers <- read_from_db(dbpath, "Interviewer")
+  proj <- read_from_db(dbpath, "Projects")
+  proj.id <- proj$id[proj$name == opts$name]
+  proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
+  proj.interviewers[c('proj_id', "contact")] <- NULL 
   
-  if (opts$name != "NFWP") {
-    !(interviewer.db$name %in% facility.df$interviewer_name)
-  }
-    
   facility.df <-
-    link_db_tables(facility.df, interviewer.db, "interviewer_name", "name", "interviewer_id")
+    link_db_tables(
+      facility.df, 
+      proj.interviewers, 
+      "interviewer_name", 
+      "name", 
+      "interviewer_id"
+    )
   
   # For those variables for "referrals to" i.e. always/sometimes/never
   for(i in grep("^refto_", names(alldata), value = TRUE)) {
