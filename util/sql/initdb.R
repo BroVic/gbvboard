@@ -59,6 +59,11 @@ dbpath <- if (interactive()) {
 states <- opts$states
 alldata <- combine_project_data(opts$name, opts$states, dbpath)
 
+## Clean up bad State entry for NEDC project
+if (opts$name == "NEDC")
+  alldata <- 
+    transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
+
 ## Apply variable labels
 var_label(alldata) <- 
   var_label(load_data(dbpath, states[1]), unlist = TRUE)  # TODO: Review this.
@@ -108,10 +113,6 @@ local({
   tables <- c("States", "LGAs", "Devices")
   variables <- opts$vars[c("state", "lga", "device.id")]
   
-  if (opts$name == "NEDC") {
-    alldata <- 
-      transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
-  }
   invisible(
     walk2(variables,
           tables,
@@ -322,23 +323,9 @@ local({
     }
   }
   else {
-    args <- data.frame(var = by.x, tbl = y.tables, refcol = ref.col)
-    scrubs <- scrublist()
-    
-    for(i in seq(nrow(args))) {
-      x <- args$var[i]
-      y <- args$tbl[i]
-      ind <- match(x, names(facility.df))
-      
-      if (length(ind) > 1L)
-        stop(sQuote(x, " matches more than one column in the data"))
-      
-      facility.df[[ind]] <- 
-        create_reference_col(x, y, facility.df, dbpath, scrub = scrubs[i])
-      names(facility.df)[ind] <- args$refcol[i]
-    }
+    facility.df <-
+      update_linked_tables(by.x, y.tables, ref.col, facility.df, dbpath, scrublist())
   }
-  
   
   # Merge reference tables with main one via their respective PK IDs
   all.interviewers <- read_from_db(dbpath, "Interviewer")
@@ -471,20 +458,24 @@ local({
   tables <- c("HfType", "CostOpts")
   ref.col <- c("hftype_id", "healthfees_id")
   
-  for (i in 1:2) {
-    try({
+  if (opts$name == "NFWP") {
+    for (i in seq_along(tables)) {
       create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
-      h.data <- link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
-    })
+      h.data <- 
+        link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
+    }
   }
-  
+  else {
+    h.data <- update_linked_tables(variables, tables, ref.col, h.data, dbpath)
+  }
   append_to_db(h.data, "Health", dbpath)
-  
 })
 
 
 # Legal Aid Services
 local({
+  context <- "Legal"
+  
   var.index <-
     c(
       "oth.srvleg.dscrb",
@@ -512,18 +503,42 @@ local({
                              "LegalservicesFacility",
                              alldata,
                              dbpath)
-  varnames <- unname(opts$vars['no.resources1'])
-  create_singleresponse_tbl(varnames, "ActionNoresrc", l.data, dbpath)
   
-  tables <- c("CostOpts", "ActionNoresrc")
+  
+  
   var.index <- c("legal.paid", "no.resources1")
-  ref.col <- c("legalfees_id", "noresource1_id")
   varnames <- unname(opts$vars[var.index])
+  tables <- c("CostOpts", "ActionNoresrc")
+  ref.col <- c("legalfees_id", "noresource1_id")
   
-  for (i in 1:2)
-    l.data <- link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i])
-  
-  append_to_db(l.data, "Legal", dbpath)
+  if (opts$name == "NFWP") {
+    t <- tables[-1]
+    v <- varnames[-1]
+    
+    for (i in seq_along(t))
+      create_singleresponse_tbl(v[i], t[i], l.data, dbpath)
+    
+    for (i in seq_along(tables))
+      l.data <- 
+        link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i])
+  }
+  else {
+    new.value <- if (opts$name == "NEDC")
+      c(ActionNoresrc = "The case is closed")
+    
+    scrubs <- scrublist(context, tables, new.value)
+    
+    l.data <- update_linked_tables(
+      fctnames = varnames,
+      tblnames = tables,
+      refcolnames = ref.col,
+      data = l.data,
+      db = dbpath,
+      scrublist = scrubs,
+      insert = new.value
+    )
+  }
+  append_to_db(l.data, context, dbpath)
 })
 
 
@@ -556,11 +571,17 @@ local({
     col <- var.rgx[[rgx.index[i]]]
     create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
   }
-  psy.data <-
-    link_db_tables(psy.data, "CostOpts", "psych_fees", "name", "psychfees_id")
+  
+  fees <- "psych_fees"
+  tbl.costs <- "CostOpts"
+  ref.fees <- "psychfees_id"
+  
+  psy.data <- if (opts$name == "NFWP")
+    link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees)
+  else
+    update_linked_tables(fees, tbl.costs, ref.fees, psy.data, dbpath)
   
   append_to_db(psy.data, "Psychosocial", dbpath)
-  
 })
 
 

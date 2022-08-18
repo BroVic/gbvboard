@@ -139,21 +139,21 @@ get_labels_via_rgx <- function(df, rgx) {
 
 
 
-prepare_ref_table <- function(variable, options, data = alldata) {
-  stopifnot(is.character(options), is.data.frame(data))
-  
-  if (!variable %in% names(data))
-    stop(sQuote(variable), " is not a column name of 'data'")
-  
-  pwd <- data[[variable]] |>
-    unique() |>
-    na.omit() |>
-    as.character() |>
-    factor(levels = options,
-           ordered = TRUE)
-  
-  data.frame(id = sort(as.integer(pwd)), response = levels(pwd))
-}
+# prepare_ref_table <- function(variable, options, data = alldata) {
+#   stopifnot(is.character(options), is.data.frame(data))
+#   
+#   if (!variable %in% names(data))
+#     stop(sQuote(variable), " is not a column name of 'data'")
+#   
+#   pwd <- data[[variable]] |>
+#     unique() |>
+#     na.omit() |>
+#     as.character() |>
+#     factor(levels = options,
+#            ordered = TRUE)
+#   
+#   data.frame(id = sort(as.integer(pwd)), response = levels(pwd))
+# }
 
 
 
@@ -241,11 +241,17 @@ create_reference_col <-
            tblname,
            data,
            db,
-           scrub = NULL,
+           scrubs = NULL,
+           insert = NULL,
            manual = FALSE
   ) {
   tab <- jGBV::read_from_db(db, tblname) |>
     dplyr::arrange(id)
+  
+  # Update the table in the DB when there is a category
+  # introduced by the incoming data
+  if (!is.null(insert))
+    append_to_db(data.frame(name = insert), tblname, db)
   
   col <- data[[colname]]
   isFactor <- inherits(col, "factor")
@@ -258,15 +264,16 @@ create_reference_col <-
   
   dbcats <- tab$name
   
-  if (!identical(dfcats, dbcats)) {
+  if (!all(na.exclude(dfcats) %in% dbcats)) {
+    
     if (manual) {
-      scrub <- NULL
+      
       while (TRUE) {
         y <- -1L
         x <- menu(dfcats, title = "Value to be replaced: ")
         
         if (x) {
-          prompt <- sprintf("Value to replace %s with: ", sQuote(x.val))
+          prompt <- sprintf("Value to replace %s with: ", sQuote(colname))
           y <- menu(dbcats, title = prompt)
         }
         
@@ -280,7 +287,10 @@ create_reference_col <-
         dfcats <- dfcats[-x]
       }
     }
-    if (!is.null(scrub)) {
+    else if (!is.null(scrublist)) {
+      
+      scrub <- scrubs[[tblname]]
+      
       for (i in seq(nrow(scrub))) {
         pat <- scrub[i, 1]
         rep <- scrub[i, 2]
@@ -293,10 +303,45 @@ create_reference_col <-
       }
     }
   }
+  
+  # The end product is an integer vector, 
+  # derived from a factor
   if (!isFactor)
     col <- factor(col, dbcats)
+  
   as.integer(col)
 }
+
+
+
+
+update_linked_tables <-
+  function(fctnames,
+           tblnames,
+           refcolnames,
+           data,
+           db,
+           scrublist = NULL,
+           ...) {
+    args <- 
+      data.frame(var = fctnames, tbl = tblnames, refcol = refcolnames)
+    
+    for (i in seq(nrow(args))) {
+      x <- args$var[i]
+      y <- args$tbl[i]
+      ind <- match(x, names(data))
+      
+      if (length(ind) > 1L)
+        stop(sQuote(x, " matches more than one column in the data"))
+      
+      data[[ind]] <-
+        create_reference_col(x, y, data, db, scrub = scrublist, ...)
+      names(data)[ind] <- args$refcol[i]
+    }
+    data
+  }
+
+
 
 
 
@@ -486,72 +531,110 @@ inspect_data <- function(base, new) {
 }
 
 
-scrublist <- function() {
-  list(
-    cbind(
-      c(
-        "adults_and_children",
-        "only_adults__18_and_over",
-        "only_children__under_18"
+scrublist <- function(context = NULL, tables = character(), insert = NULL) {
+  slist <- list(
+    facility = list(
+      cbind(
+        c(
+          "adults_and_children",
+          "only_adults__18_and_over",
+          "only_children__under_18"
+        ),
+        c(
+          "Adults and children",
+          "Only adults",
+          "Only children"
+        )
       ),
-      c("Adults and children", "Only adults", "Only children")
+      cbind(
+        c(
+          "governmental__please_specify_m|Governmental (Please specify ministry or service)",
+          "international_ngo",
+          "other__describe",
+          "faith_based_organization",
+          "national_ngo",
+          "community_based_organization"
+        ),
+        c(
+          "Governmental ",
+          "International NGO",
+          "Other",
+          "Faith-based organization",
+          "National NGO",
+          "Community-based organization"
+        )
+      ),
+      cbind(
+        c("yes__open_24_7", "no__only_open_during_certain_h"),
+        c("Yes, open 24/7", "No, only open during certain hours")
+      ),
+      cbind(
+        "^No.*$", 
+        "No, respondent is unable to show them"
+      ),
+      cbind(
+        c(
+          "only_physical_data_are_stored",
+          "both_electronic_and_physical_s",
+          "only_electronic_storage_of_dat"
+        ),
+        c(
+          "Only physical data are stored",
+          "Both electronic and physical storage of data",
+          "Only electronic storage of data"
+        )
+      ),
+      cbind("Don_t_know", "Don't Know"),
+      cbind("", ""),
+      cbind("^Yes.*$", "Yes, always"),
+      cbind("", ""),
+      cbind(
+        c(
+          "every_six_months_or_less",
+          "it_has_never_been_updated",
+          "every_year",
+          "more_than_a_year"
+        ),
+        c(
+          "Every six months or less",
+          "It has never been updated",
+          "Every year",
+          "More than a year"
+        )
+      ),
+      cbind("Don_t_know", "Don't Know"),
+      cbind("", ""),
+      cbind("", ""),
+      cbind("", "")
     ),
-    cbind(
-      c(
-        "governmental__please_specify_m|Governmental (Please specify ministry or service)",
-        "international_ngo",
-        "other__describe",
-        "faith_based_organization",
-        "national_ngo",
-        "community_based_organization"
-      ),
-      c(
-        "Governmental ",
-        "International NGO",
-        "Other",
-        "Faith-based organization",
-        "National NGO",
-        "Community-based organization"
+    
+    legal = list(
+      cbind("Pay", "Paid"),
+      cbind(
+        c("the_case_is_transferred_to_ano",
+          "other",
+          "the_survivor_is_asked_to_pay",
+          "the_case_is_closed"),
+        c("The case is transferred to another organization",
+          "Other",
+          "The survivor is asked to pay",
+          "The case is closed")
       )
-    ),
-    cbind(
-      c("yes__open_24_7", "no__only_open_during_certain_h"),
-      c("Yes, open 24/7", "No, only open during certain hours")
-    ),
-    cbind("^No.*$", "No, respondent is unable to show them"),
-    cbind(
-      c(
-        "only_physical_data_are_stored",
-        "both_electronic_and_physical_s",
-        "only_electronic_storage_of_dat"
-      ),
-      c(
-        "Only physical data are stored",
-        "Both electronic and physical storage of data",
-        "Only electronic storage of data"
-      )
-    ),
-    cbind("Don_t_know", "Don't Know"),
-    cbind("", ""),
-    cbind("^Yes.*$", "Yes, always"),
-    cbind("", ""),
-    cbind(
-      c(
-        "every_six_months_or_less",
-        "it_has_never_been_updated",
-        "every_year",
-        "more_than_a_year"
-      ),
-      c(
-        "Every six months or less",
-        "It has never been updated",
-        "Every year",
-        "More than a year"
-      )
-    ),
-    cbind("Don_t_know", "Don't Know"),
-    cbind("", ""),
-    cbind("", ""),
-    cbind("", "")
+    )
   )
+  
+  context <- if (is.null(context))
+    "facility"
+  else
+    tolower(context)
+    
+  obj <- structure(slist[[context]], names = tables)
+  
+  # Add up the values used to update the DB table
+  # so that they are used in the comparisons
+  # if (!is.null(insert)) {
+  #   nm <- names(insert)
+  #   obj[[nm]] <- c(obj[[nm]], insert)
+  # }
+  obj
 }
