@@ -497,8 +497,6 @@ CREATE TABLE IF NOT EXISTS Psychosocial (
   psychfee_therapy REAL,
   psychfee_safety REAL,
   psychfee_other REAL,
-  acttion_noresrc INTEGER,
-  other_action TEXT,
   describe_other_psytrain TEXT,
   id_qualstaff TEXT,
   PRIMARY KEY (id),

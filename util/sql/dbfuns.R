@@ -234,85 +234,6 @@ create_singleresponse_tbl <- function(col, tblname, data, db) {
 
 
 
-# Converts a column with categorical variables into one that has
-# integer values, referencing a corresponding table from the database
-create_reference_col <-
-  function(colname,
-           tblname,
-           data,
-           db,
-           scrubs = NULL,
-           insert = NULL,
-           manual = FALSE
-  ) {
-  tab <- jGBV::read_from_db(db, tblname) |>
-    dplyr::arrange(id)
-  
-  # Update the table in the DB when there is a category
-  # introduced by the incoming data
-  if (!is.null(insert))
-    append_to_db(data.frame(name = insert), tblname, db)
-  
-  col <- data[[colname]]
-  isFactor <- inherits(col, "factor")
-  
-  dfcats <-
-    if (isFactor)
-      levels(col)
-  else
-    unique(col)
-  
-  dbcats <- tab$name
-  
-  if (!all(na.exclude(dfcats) %in% dbcats)) {
-    
-    if (manual) {
-      
-      while (TRUE) {
-        y <- -1L
-        x <- menu(dfcats, title = "Value to be replaced: ")
-        
-        if (x) {
-          prompt <- sprintf("Value to replace %s with: ", sQuote(colname))
-          y <- menu(dbcats, title = prompt)
-        }
-        
-        if (!x || !y) {
-          message("Exited menu-based editing")
-          break
-        }
-        
-        x.val <- dfcats[x]
-        col[col %in% x.val] <- dbcats[y]
-        dfcats <- dfcats[-x]
-      }
-    }
-    else if (!is.null(scrublist)) {
-      
-      scrub <- scrubs[[tblname]]
-      
-      for (i in seq(nrow(scrub))) {
-        pat <- scrub[i, 1]
-        rep <- scrub[i, 2]
-        
-        if (pat == "" && rep == "")
-          next
-        
-        message("Replacing ", sQuote(pat), " with ", sQuote(rep))
-        col <- gsub(pat, rep, col)
-      }
-    }
-  }
-  
-  # The end product is an integer vector, 
-  # derived from a factor
-  if (!isFactor)
-    col <- factor(col, dbcats)
-  
-  as.integer(col)
-}
-
-
 
 
 update_linked_tables <-
@@ -322,23 +243,135 @@ update_linked_tables <-
            data,
            db,
            scrublist = NULL,
+           insertions = NULL,
            ...) {
-    args <- 
+    argd <- 
       data.frame(var = fctnames, tbl = tblnames, refcol = refcolnames)
     
-    for (i in seq(nrow(args))) {
-      x <- args$var[i]
-      y <- args$tbl[i]
-      ind <- match(x, names(data))
+    for (i in seq(nrow(argd))) {
+      x <- argd$var[i]
+      indx <- match(x, names(data))
       
-      if (length(ind) > 1L)
-        stop(sQuote(x, " matches more than one column in the data"))
+      if (length(indx) > 1L)
+        stop(sQuote(x, " matches more than one variable in 'data'"))
       
-      data[[ind]] <-
-        create_reference_col(x, y, data, db, scrub = scrublist, ...)
-      names(data)[ind] <- args$refcol[i]
+      y <- argd$tbl[i]
+      indy <- match(y, names(insertions))
+      insert <- NULL
+      
+      if (!is.na(indy)) {
+        nmi <- names(insertions)[indy]  # TODO: Refactor
+        insert <- insertions[[indy]]
+        names(insert) <- nmi
+      }
+      
+      data[[indx]] <-
+        .createRefCol(x, y, data, db, scrub = scrublist, insert = insert, ...)
+      names(data)[indx] <- argd$refcol[i]
     }
     data
+  }
+
+
+
+# Converts a column with categorical variables into one that has
+# integer values, referencing a corresponding table from the database
+.createRefCol <-
+  function(colname,
+           tblname,
+           data,
+           db,
+           scrubs = NULL,
+           insert = NULL,
+           manual = FALSE
+  ) {
+    tab <- jGBV::read_from_db(db, tblname) |>
+      dplyr::arrange(id)
+    
+    # Update the table in the DB when there is a category
+    # introduced by the incoming data
+    if (!is.null(insert)) {
+      dest.tbl <- names(insert)
+      
+      if (!identical(tblname, dest.tbl))
+        stop(
+          "Value(s) ",
+          sQuote(paste(insert, sep = ", ")),
+          " to be into the ",
+          sQuote(dest.tbl),
+          " table, not ",
+          sQuote(tblname)
+        )
+      
+      tryCatch({
+        message("Updating the table ", sQuote(tblname), "... ",
+                appendLF = FALSE)
+        append_to_db(data.frame(name = insert), tblname, db)
+        message("Done")
+      }, 
+      error = function(e) {
+        message("Failed")
+        warning(e, call. = FALSE)
+      })
+    }
+    
+    col <- data[[colname]]
+    isFactor <- inherits(col, "factor")
+    
+    dfcats <-
+      if (isFactor)
+        levels(col)
+    else
+      unique(col)
+    
+    dbcats <- tab$name
+    
+    if (!all(na.exclude(dfcats) %in% dbcats)) {
+      
+      if (manual) {
+        
+        while (TRUE) {
+          y <- -1L
+          x <- menu(dfcats, title = "Value to be replaced: ")
+          
+          if (x) {
+            prompt <- sprintf("Value to replace %s with: ", sQuote(colname))
+            y <- menu(dbcats, title = prompt)
+          }
+          
+          if (!x || !y) {
+            message("Exited menu-based editing")
+            break
+          }
+          
+          x.val <- dfcats[x]
+          col[col %in% x.val] <- dbcats[y]
+          dfcats <- dfcats[-x]
+        }
+      }
+      else if (!is.null(scrublist)) {
+        
+        scrub <- scrubs[[tblname]]
+        
+        for (i in seq(nrow(scrub))) {
+          pat <- scrub[i, 1]
+          rep <- scrub[i, 2]
+          
+          if (pat == "" && rep == "")
+            next
+          
+          message("Replacing ", sQuote(pat), " with ", sQuote(rep))
+          col <- gsub(pat, rep, col)
+        }
+      }
+    }
+    
+    # The end product is an integer vector, 
+    # derived from a factor
+    if (!isFactor)
+      col <- factor(col, dbcats)
+    
+    as.integer(col)
   }
 
 
@@ -464,13 +497,12 @@ get_project_options <- function(dir, reset = FALSE) {
     c(
       "jgbv.project.name",
       "jgbv.project.year",
-      "jgbv.new.varnames",
       "jgbv.multiresponse.regex",
       "jgbv.project.states"
     ),
     getOption
   ) |>
-    setNames(c("name", "year", "vars", "regex", "states"))
+    setNames(c("name", "year", "regex", "states"))
   
   if (!reset)
     options(curr.opts)
@@ -609,7 +641,7 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
     ),
     
     legal = list(
-      cbind("Pay", "Paid"),
+      cbind("Pay.+", "Paid"),
       cbind(
         c("the_case_is_transferred_to_ano",
           "other",

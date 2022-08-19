@@ -47,6 +47,7 @@ if (!dir.exists(dir))
 dir <- normalizePath(dir, winslash = "/")
 
 opts <- get_project_options(dir)
+opts$vars <- jGBV::new.varnames
 
 dbpath <- if (interactive()) {
   file.choose()
@@ -488,6 +489,7 @@ local({
       "legalfee.med",
       "legalfee.secur",
       "legalfee.counsel",
+      "legalfee.other",
       "support.for.court",         # bool
       "no.resources1",             # FK
       "no.resources2"
@@ -535,7 +537,7 @@ local({
       data = l.data,
       db = dbpath,
       scrublist = scrubs,
-      insert = new.value
+      insertions = new.value
     )
   }
   append_to_db(l.data, context, dbpath)
