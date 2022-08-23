@@ -145,9 +145,11 @@ make_plot <- function(data, widgets) {
 # === Server function ===
 function(input, output, session) {
   dtInput <- reactive({
+    
     grepcols <- function(rgx) {
       which(!grepl(rgx, names(df)))
     }
+    
     tbl <- dbTables[[input$dbtbl]]
     qry <- sprintf("SELECT * FROM %s;", tbl)
     df <- fetch_data(qry, "data.db")
@@ -159,32 +161,38 @@ function(input, output, session) {
     if (input[[ctrl$tables$id]] == "Facilities")
       df <- subset(df, select = grepcols("^gps_"))
     
-    if (input$state != opts$allstates)
+    if (input$state != opts$allopts)
       df <- subset(df, State == input$state, select = -State)
+    
     set_types(df)
   },
   label = "Data initialization")
   
   observe({
     project <- input$proj
+    
     updateSelectInput(
       session,
       ctrl$state$id, 
       ctrl$state$lab, 
-      choices = c(opts$allstates, projectStates[[project]])
+      choices = c(opts$allopts, projectStates[[project]])
     )
   })
   
   rSelectOpts <- reactiveValues()
+  
   observe({                 # x-variable control
+    
     rSelectOpts$x <- var_opts(dtInput())
     xval <- input$x
+    
     if (!isTruthy(xval)) {
       xval <- NULL
       yval <- isolate(input$y)
       if (isTruthy(yval))
         xval <- yval
     }
+    
     update_var_control(
       session,
       ctrl$xvar$id,
@@ -196,10 +204,12 @@ function(input, output, session) {
   observe({              # y-variable control
     nms <- rSelectOpts$x
     x.val <- input$x
+    
     rSelectOpts$y <- if (isTruthy(x.val))
       nms[!(nms %in% x.val)]
     else
       nms
+    
     update_var_control(
       session,
       ctrl$yvar$id,
@@ -212,14 +222,17 @@ function(input, output, session) {
                { 
                  df <- isolate(dtInput())
                  rSelectOpts$x <- var_opts(df)
+                 
                  update_var_control(session,
                                     ctrl$xvar$id,
                                     choices = rSelectOpts$x,
                                     selected = character(1))
+                 
                  update_var_control(session,
                                     ctrl$yvar$id,
                                     choices = isolate(rSelectOpts$y),
                                     selected = character(1))
+                 
                  reset_plot_orientation(session, ctrl)
                })
   
@@ -229,15 +242,21 @@ function(input, output, session) {
   updateCheckboxInput(session, ctrl$fill$id, ctrl$fill$lab, value = FALSE))
   
   varclass <- reactiveValues()
+  
   observe({
     df <- isolate(dtInput())
     x <- input$x
+    
     if (!isTruthy(x))
       return()
+    
     varclass$X <- .get_class(df, x)
+    
     if (varclass$X != "factor")
       reset_plot_orientation(session, ctrl)
+    
     y <- input$y
+    
     if (isTruthy(y)) 
       varclass$Y <- .get_class(df, y)
   })
@@ -246,6 +265,7 @@ function(input, output, session) {
     upd <-
       function(var, sel, ss = session, cc = isolate(rSelectOpts$x))
         update_var_control(ss, var, choices = cc, selected = sel)
+    
     upd(ctrl$xvar$id, isolate(input$y))
     upd(ctrl$yvar$id, isolate(input$x))
   })
@@ -256,7 +276,9 @@ function(input, output, session) {
   ## The main chart
   #################
   rGgObj <- reactiveVal()
+  
   output$plot <- renderPlot({
+    
     if (!isTruthy(input$x))
       return()
     
@@ -290,8 +312,10 @@ function(input, output, session) {
   ## The summary table
   ####################
   output$sumtable <- renderTable({
+    
     if (!isTruthy(input$x))
       return()
+    
     app_table(dtInput(), input)
   },
   rownames = TRUE,
@@ -303,8 +327,10 @@ function(input, output, session) {
   ## The data table
   #################
   output$DT <- renderDataTable({
+    
     if (isFALSE(input$maindata))
       return()
+    
     dtInput()
   })
 }

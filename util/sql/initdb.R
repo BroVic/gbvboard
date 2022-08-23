@@ -49,12 +49,9 @@ dir <- normalizePath(dir, winslash = "/")
 opts <- get_project_options(dir)
 opts$vars <- jGBV::new.varnames
 
-dbpath <- if (interactive()) {
-  file.choose()
-} else {
-  message("Using the NFWP database by default")
-  params[2]
-}
+dbpath <- file.path(dir, "data", paste0(tolower(basename(dir)), ".db"))
+if (!file.exists(dbpath))
+  stop("The database ", sQuote(dbpath), " does not exist")
 
 ## Fetch the data
 states <- opts$states
@@ -67,7 +64,7 @@ if (opts$name == "NEDC")
 
 ## Apply variable labels
 var_label(alldata) <- 
-  var_label(load_data(dbpath, states[1]), unlist = TRUE)  # TODO: Review this.
+  var_label(load_data(dbpath, states[1], vars = opts$vars), unlist = TRUE)
 
 var.rgx <- as.list(opts$regex)
 
@@ -125,14 +122,14 @@ local({
 
 # The Interviewers
 local({
-  ivars <- opts$vars
-  interviewer <- alldata[, ivars[c('interviewer', 'interviewer.contact')]]
-  interviewer <- interviewer[!duplicated(interviewer[[1L]]), ]
-  names(interviewer) <- c("name", "contact")
-  proj <- read_from_db(dbpath, "Projects")
-  proj.id <- proj$id[proj$name == opts$name]
-  interviewer$proj_id <- proj.id
-  append_to_db(interviewer, "Interviewer", dbpath)
+  ivars <- opts$vars[c('interviewer', 'interviewer.contact')]
+  ra <- alldata[, ivars]
+  ra.name <- ra[[ivars[1]]]
+  ra <- ra[!duplicated(ra.name), ]
+  names(ra) <- c("name", "contact")
+  ra <- apply_project_id(ra, dbpath, opts$name)
+  
+  append_to_db(ra, "Interviewer", dbpath)
 })
 
 # Facility-specific data
@@ -320,13 +317,16 @@ local({
   if (opts$name == "NFWP") {
     for (i in seq_along(y.tables)) {
       facility.df <-
-        link_db_tables(facility.df, y.tables[i], by.x[i], "name", ref.col[i])
+        link_db_tables(facility.df, y.tables[i], by.x[i], "name", ref.col[i], dbpath)
     }
   }
   else {
     facility.df <-
       update_linked_tables(by.x, y.tables, ref.col, facility.df, dbpath, scrublist())
   }
+  
+  # Add a column for 'Projects"
+  facility.df <- apply_project_id(facility.df, dbpath, opts$name)
   
   # Merge reference tables with main one via their respective PK IDs
   all.interviewers <- read_from_db(dbpath, "Interviewer")
@@ -348,7 +348,7 @@ local({
   for(i in grep("^refto_", names(alldata), value = TRUE)) {
     refname <- paste0(i, "_id")
     facility.df <-
-      link_db_tables(facility.df, "ReferralToOptions", i, "name", refname)
+      link_db_tables(facility.df, "ReferralToOptions", i, "name", refname, dbpath)
   }
   
   append_to_db(facility.df, "Facility", dbpath)
@@ -463,7 +463,7 @@ local({
     for (i in seq_along(tables)) {
       create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
       h.data <- 
-        link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i])
+        link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i], dbpath)
     }
   }
   else {
@@ -522,7 +522,7 @@ local({
     
     for (i in seq_along(tables))
       l.data <- 
-        link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i])
+        link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i], dbpath)
   }
   else {
     new.value <- if (opts$name == "NEDC")
@@ -579,7 +579,7 @@ local({
   ref.fees <- "psychfees_id"
   
   psy.data <- if (opts$name == "NFWP")
-    link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees)
+    link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees, dbpath)
   else
     update_linked_tables(fees, tbl.costs, ref.fees, psy.data, dbpath)
   
@@ -629,7 +629,7 @@ local({
     create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
   }
   pol.data <-
-    link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id")
+    link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id", dbpath)
   
   append_to_db(pol.data, "Police", dbpath)
   
@@ -676,7 +676,7 @@ local({
   create_singleresponse_tbl(varname, elec.tbl, shel.data, dbpath)
   
   shel.data <-
-    link_db_tables(shel.data, elec.tbl, varname, "name", "elecwater_id")
+    link_db_tables(shel.data, elec.tbl, varname, "name", "elecwater_id", dbpath)
   
   append_to_db(shel.data, "Shelter", dbpath)
 })

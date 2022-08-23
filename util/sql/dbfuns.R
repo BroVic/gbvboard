@@ -157,9 +157,19 @@ get_labels_via_rgx <- function(df, rgx) {
 
 
 
-link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL) {
-  if (is.character(y))
-    y <- read_from_db(dbpath, y) # Note that this is an impure function. See def.
+link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL, db = NULL) {
+  
+  if (is.character(y)) {
+    
+    if (length(y) > 1L)
+      stop("'y' must be a single string")
+    
+    if (is.null(db))
+      stop(sQuote(y),
+           " is a string (i.e. a table is being read) but 'db' is NULL")
+    
+    y <- read_from_db(db, y)
+  }
   
   if (is.null(by.y)) 
     by.y <- by.x
@@ -167,12 +177,9 @@ link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL) {
   if (is.null(ref.col)) 
     ref.col <- by.x
   
-  ndf <- 
-    merge(x, y, by.x = by.x, by.y = by.y, all = TRUE)
-  
+  ndf <- merge(x, y, by.x = by.x, by.y = by.y, all = TRUE)
   ndf[[by.x]] <- NULL
   names(ndf)[match("id", names(ndf))] <- ref.col
-  
   ndf
 }
 
@@ -669,4 +676,25 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
   #   obj[[nm]] <- c(obj[[nm]], insert)
   # }
   obj
+}
+
+
+
+
+# Gives a data frame project IDs which are to be used in the 
+# database table
+apply_project_id <- function(df, db, proj.name, proj.id.name = "proj_id") {
+  if (!is.data.frame(df))
+    stop("df' must be a data frame")
+  
+  if (!file.exists(db))
+    stop(sQuote(db), "does not exist")
+  
+  if (!is.character(proj.name) || !is.character(proj.id.name))
+    stop("'proj.name' or 'proj.id.name' must of type 'character'")
+  
+  proj <- read_from_db(db, "Projects")
+  proj.id.no <- proj$id[proj$name == proj.name]
+  df[[proj.id.name]] <- proj.id.no
+  df
 }

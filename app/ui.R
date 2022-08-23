@@ -33,8 +33,8 @@ fluidPage(
     column(
       width = 3,
       inputPanel(
-        selectInput(ctrl$project$id, ctrl$project$lab, choices = projectNames[1]),
-        selectInput(ctrl$state$id, ctrl$state$lab, choices = opts$allstates),
+        selectInput(ctrl$project$id, ctrl$project$lab, choices = opts$allopts),
+        selectInput(ctrl$state$id, ctrl$state$lab, choices = opts$allopts),
         selectInput(ctrl$tables$id, ctrl$tables$lab, choices = names(dbTables), selected = "Facilities"),
         wellPanel(
           selectInput(ctrl$xvar$id, ctrl$xvar$lab, choices = ""),

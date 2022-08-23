@@ -42,18 +42,18 @@ ctrl <-
     )
   )
 
-opts <- list(allstates = "All")
-
+opts <- list(allopts = "All")
 dbTables <- c(Facilities = "FacilitiesBasic")
-projectNames <- c("NFWP")
 
-projects <- 
-  structure(projectNames, names = paste0("proj", seq_along(projectNames)))
+# projects <- 
+#   structure(projectNames, names = paste0("proj", seq_along(projectNames)))
+
+projectNames <- c("NFWP", "NEDC")
 
 projectStates <- structure(
   list(
-    c("Taraba", "Kebbi", "Niger")
-    # c("Adamawa", "Borno", "Yobe")
+    c("Taraba", "Kebbi", "Niger"),
+    c("Adamawa", "Borno", "Yobe")
   ),
   names = projectNames
 )

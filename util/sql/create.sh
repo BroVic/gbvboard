@@ -45,8 +45,20 @@ cp $nfwp_db $app_db
 sqlite3 $app_db < create.sql
 
 # Populate the tables with the data
-echo "Initializing the database"
+echo "Initializing the NFWP database"
 "$R_EXE" initdb.R $nfwp_dir $app_db
+
+
+cd $proj_dir
+
+
+cd ../NEDC
+# TODO: Check if .Rprof file exists
+nedc_dir=$(pwd)
+cd $sql_dir
+
+echo "Populating the database from NEDC"
+"$R_EXE" initdb.R $nedc_dir $app_db
 
 # Create views
 echo "Creating the database views"
