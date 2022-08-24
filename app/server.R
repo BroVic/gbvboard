@@ -9,13 +9,17 @@ library(shiny)
 # Defines how the summary table is going to be represented
 app_table <- function(dat, inputObj, ...) {
   stopifnot(is.data.frame(dat))
+  
   x <- inputObj$x
   y <- inputObj$y
   xcol <- dat[[x]]
   freq <- "Frequency"
+  
   if (!isTruthy(y)) {
+    
     if (is.factor(xcol))
       return(table(xcol, dnn = x, ...))
+    
     if (is.numeric(xcol)) {
       sm <- summary(xcol, ...)
       nm <- names(sm)
@@ -24,6 +28,7 @@ app_table <- function(dat, inputObj, ...) {
       return(sm)
     }
   }
+  
   table(xcol, dat[[y]], ...) |>
     as.data.frame() |>
     setNames(c(x, y, freq)) |>
@@ -51,21 +56,25 @@ set_types <- function(dat) {
   
   # Sets the type of a given column based on certain conditions
   setType <- function(col) {
+    
     if (!is.character(col))
       return(col)
     
     tmpcol <- na.omit(col)  # in case there are missing values
     
     if (length(unique(col)) > 10L) {
+      
       tryCatch({
         dgt <- "[[:digit:]]"
         dgtrgx <- paste0(dgt, "{4}-", dgt, "{2}-", dgt, "{2}.?")
         
         if (all(grepl(dgtrgx, tmpcol))) {
+          
           col <- if (all(nchar(tmpcol)) == 10L)
             as.Date(col)
           else
             as.POSIXct(col)
+          
           return(col)
         }
       }, error = function(e) col)
@@ -84,10 +93,12 @@ set_types <- function(dat) {
 
 fetch_data <- function(qry, db) {
   require(RSQLite, quietly = TRUE)
+  
   stopifnot({
     is.character(qry)
     file.exists(db)
   })
+  
   dbcon <- dbConnect(SQLite(), db)
   on.exit(dbDisconnect(dbcon))
   dbGetQuery(dbcon, qry)
@@ -112,15 +123,18 @@ reset_plot_orientation <- function(session, controls) {
 
 make_plot <- function(data, widgets) {
   require(ggplot2, quietly = TRUE)
+  
   x.var <- widgets$x
   y.var <- widgets$y
   
   ycol <- NULL
   ptitle <- x.var
+  
   if (isTruthy(y.var)) {
     ycol <- data[[y.var]]
     ptitle <- sprintf("%s and %s", x.var, y.var)
   }
+  
   xcol <- data[[x.var]]
   p <- plotMethod(xcol, ycol, df = data, widgets)
   p <- p + 
@@ -128,6 +142,7 @@ make_plot <- function(data, widgets) {
   
   if (widgets$rotate)
     p <- p + coord_flip()
+  
   p
 }
 
@@ -181,14 +196,14 @@ function(input, output, session) {
   
   rSelectOpts <- reactiveValues()
   
-  observe({                 # x-variable control
-    
+  observe({    # x-variable control
     rSelectOpts$x <- var_opts(dtInput())
     xval <- input$x
     
     if (!isTruthy(xval)) {
       xval <- NULL
       yval <- isolate(input$y)
+      
       if (isTruthy(yval))
         xval <- yval
     }
@@ -201,7 +216,7 @@ function(input, output, session) {
     )
   })
   
-  observe({              # y-variable control
+  observe({    # y-variable control
     nms <- rSelectOpts$x
     x.val <- input$x
     
