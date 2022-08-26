@@ -3,37 +3,57 @@
 # License: MIT
 #
 # Copyright (c) 2022 Victor Ordu
+ctrl <-
+  c(
+    Project = "proj",
+    State = "state",
+    Data = "dbtbl",
+    Clear = "reset",
+    Invert = "invert",
+    x = "x",
+    y = "y",
+    `Horizontal layout` = "rotate",
+    `Order by frequency` = "order",
+    `Stack bars` = "stack",
+    Fill = "fill",
+    `Reverse order` = "reverse",
+    `No. of bins` = "bins",
+    `Save...` = "saveplot",
+    `Log transform` = "log"
+  ) |>
+  purrr::imap(~ list(id = .x, lab = .y)) |>
+  setNames(
+    c(
+      "project",
+      "state",
+      "tables",
+      "reset",
+      "invert",
+      "xvar",
+      "yvar",
+      "horiz",
+      "order",
+      "stack",
+      "fill",
+      "reverse",
+      "bins",
+      "saveplot",
+      "log"
+    )
+  )
 
-ctrl <- list(
-  project = list(id = "proj", lab = "Project"),
-  state = list(id = "state", lab = "State"),
-  tables = list(id = "dbtbl", lab = "Data"),
-  reset = list(id = "reset", lab = "Clear"),
-  invert = list(id = "invert", lab = "Invert"),
-  xvar = list(id = "x", lab = "x"),
-  yvar = list(id = "y", lab = "y"),
-  horiz = list(id = "rotate", lab = "Horizontal layout"),
-  order = list(id = "order", lab = "Order by frequency"),
-  stack = list(id = "stack", lab = "Stack bars"),
-  fill = list(id = "fill", lab = "Fill"),
-  reverse = list(id = "reverse", lab = "Reverse order"),
-  bins = list(id = "bins", lab = "No. of bins"),
-  saveplot = list(id = 'saveplot', lab = 'Save...'),
-  log = list(id = "log", lab = "Log transform")
-)
-
-opts <- list(allstates = "All")
-
+allopts = "All"
 dbTables <- c(Facilities = "FacilitiesBasic")
-projectNames <- c("NFWP")
 
-projects <- 
-  structure(projectNames, names = paste0("proj", seq_along(projectNames)))
+# projects <- 
+#   structure(projectNames, names = paste0("proj", seq_along(projectNames)))
+
+projectNames <- c("NFWP", "NEDC")
 
 projectStates <- structure(
   list(
-    c("Taraba", "Kebbi", "Niger")
-    # c("Adamawa", "Borno", "Yobe")
+    c("Taraba", "Kebbi", "Niger"),
+    c("Adamawa", "Borno", "Yobe")
   ),
   names = projectNames
 )

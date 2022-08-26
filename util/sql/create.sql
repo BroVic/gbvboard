@@ -5,10 +5,7 @@
 -- Copyright (c) Victor Ordu 2022
 
 
-------          ----
--- PRELIMINARIES
-------          ----
--- Table projects
+-- Table Projects
 -- Description: Jhpiego GBV projects
 CREATE TABLE IF NOT EXISTS Projects (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,14 +13,14 @@ CREATE TABLE IF NOT EXISTS Projects (
   year TEXT
 );
 
--- Table: states
+-- Table: States
 -- Description: States where mapping was conducted
 CREATE TABLE IF NOT EXISTS States (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL
 );
 
--- Table: lgas
+-- Table: LGAs
 -- Description: Study Local Government Areas
 CREATE TABLE IF NOT EXISTS LGAs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +36,7 @@ CREATE TABLE IF NOT EXISTS PrivateQuesOpts (
 -- Table: Facility
 -- Description: General Facility Information
 CREATE TABLE IF NOT EXISTS Facility (
-  facility_id INTEGER PRIMARY KEY,
+  facility_id INTEGER PRIMARY KEY AUTOINCREMENT,
   int_start TEXT,
   int_end TEXT,
   today TEXT,
@@ -50,6 +47,7 @@ CREATE TABLE IF NOT EXISTS Facility (
   org_name TEXT NOT NULL,
   started_ops TEXT,
   started_gbv TEXT,
+  proj_id INTEGER NOT NULL,
   state_id INTEGER NOT NULL,
   lga_id INTEGER NOT NULL,
   ward TEXT,
@@ -127,6 +125,7 @@ CREATE TABLE IF NOT EXISTS Facility (
   coord_which TEXT,
   coord_comments TEXT,
   describe_other_srvtype TEXT,
+  FOREIGN KEY (proj_id) REFERENCES Projects(id),
   FOREIGN key (state_id) REFERENCES States(id),
   FOREIGN KEY (lga_id) REFERENCES LGAs(id),
   FOREIGN KEY (interviewer_id) REFERENCES Interviewer(id),
@@ -151,8 +150,10 @@ CREATE TABLE IF NOT EXISTS Devices (
 
 CREATE TABLE IF NOT EXISTS Interviewer (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proj_id INTEGER NOT NULL,
   name TEXT NOT NULL,
-  contact TEXT
+  contact TEXT,
+  FOREIGN KEY (proj_id) REFERENCES Projects(id)
 );
 
 CREATE TABLE IF NOT EXISTS GBVtypes (
@@ -498,8 +499,6 @@ CREATE TABLE IF NOT EXISTS Psychosocial (
   psychfee_therapy REAL,
   psychfee_safety REAL,
   psychfee_other REAL,
-  acttion_noresrc INTEGER,
-  other_action TEXT,
   describe_other_psytrain TEXT,
   id_qualstaff TEXT,
   PRIMARY KEY (id),

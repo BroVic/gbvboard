@@ -11,6 +11,10 @@ cd ../..
 # TODO: check if .Rproj file exists
 proj_dir=$(pwd)
 
+app_dir=$proj_dir/app
+app_db=$app_dir/data.db
+rm -f $app_db
+
 cd ../NFWP
 # TODO: Check if .Rprof file exists
 nfwp_dir=$(pwd)
@@ -37,20 +41,27 @@ nfwp_db=$nfwp_dir/data/nfwp.db
 # Start by copying the database from the project
 echo "Creating the app database with its tables"
 cd $sql_dir
-app_db=$sql_dir/data.db
-
 cp $nfwp_db $app_db
 sqlite3 $app_db < create.sql
 
 # Populate the tables with the data
-echo "Initializing the database"
+echo "Initializing the NFWP database"
 "$R_EXE" initdb.R $nfwp_dir $app_db
+
+
+cd $proj_dir
+
+
+cd ../NEDC
+# TODO: Check if .Rprof file exists
+nedc_dir=$(pwd)
+cd $sql_dir
+
+echo "Populating the database from NEDC"
+"$R_EXE" initdb.R $nedc_dir $app_db
 
 # Create views
 echo "Creating the database views"
 sqlite3 $app_db < views.sql
-
-echo "Installing the database"
-mv $app_db $proj_dir/app
 
 cd $proj_dir

@@ -6,27 +6,34 @@
 
 CREATE VIEW IF NOT EXISTS FacilitiesBasic AS
 SELECT facility_id,
-  started_ops AS open_date,
-  started_gbv AS gbv_date,
-  States.name AS State,
+  Projects.name AS Project, 
+  States.name AS State, 
   LGAs.name AS LGA,
   Ward,
   gps_long,
   gps_lat,
   gps_alt,
   gps_prec,
-  Orgtypes.name AS org_type,
-  OpenAccess.name AS open_247,
-  open_time,
-  close_time,
-  AgeGrp.name AS age_group,
-  num_fulltime,
-  num_parttime,
-  num_female
-FROM Facility, States, LGAs, OrgTypes, AgeGrp, OpenAccess
-WHERE Facility.state_id=States.id
-  AND Facility.lga_id=LGAs.id 
-  AND Facility.agegrp_id=AgeGrp.id 
-  AND Facility.orgtype_id=OrgTypes.id 
-  AND Facility.open247_id=OpenAccess.id;
-  
+  Orgtypes.name AS orgtype,
+  OpenAccess.name AS open247,
+  AgeGrp.name AS age_grp,
+  started_ops AS opstart,
+  started_gbv AS gbvstart,
+  open_time AS open,
+  close_time AS close,
+  num_fulltime AS no_fulltime,
+  num_parttime AS no_parttime,
+  num_female AS no_female
+FROM Facility 
+LEFT JOIN Projects 
+  ON Facility.proj_id=Projects.id
+LEFT JOIN States 
+  ON Facility.state_id=States.id
+LEFT JOIN LGAs
+  ON Facility.lga_id=LGAs.id
+LEFT JOIN AgeGrp
+  ON Facility.agegrp_id=AgeGrp.id
+LEFT JOIN Orgtypes
+  ON Facility.orgtype_id=OrgTypes.id
+LEFT JOIN OpenAccess 
+  ON Facility.open247_id=OpenAccess.id;

@@ -33,19 +33,17 @@ fluidPage(
     column(
       width = 3,
       inputPanel(
-        selectInput(ctrl$project$id, ctrl$project$lab, choices = projectNames[1]),
-        selectInput(ctrl$state$id, ctrl$state$lab, choices = opts$allstates),
-        selectInput(ctrl$tables$id, ctrl$tables$lab, choices = names(dbTables), selected = "Facilities"),
+        selectInput(ctrl$project$id, ctrl$project$lab, c(allopts, projectNames)),
+        selectInput(ctrl$state$id, ctrl$state$lab, allopts),
+        selectInput(ctrl$tables$id, ctrl$tables$lab, names(dbTables), "Facilities"),
         wellPanel(
-          selectInput(ctrl$xvar$id, ctrl$xvar$lab, choices = ""),
-          selectInput(ctrl$yvar$id, ctrl$yvar$lab, choices = ''),
+          selectInput(ctrl$xvar$id, ctrl$xvar$lab, ""),
+          selectInput(ctrl$yvar$id, ctrl$yvar$lab, ""),
           actionButton(ctrl$reset$id, ctrl$reset$lab),
           actionButton(ctrl$invert$id, ctrl$invert$lab)
         )
       )
     ),
-    
-    # Plot Area
     column(
       width = 6, 
       wellPanel(
@@ -58,10 +56,10 @@ fluidPage(
           checkboxInput(ctrl$reverse$id, ctrl$reverse$lab),
           conditionalPanel(
             "output.yvar == 'factor'",
-            checkboxInput(ctrl$stack$id, ctrl$stack$lab, value = TRUE),
+            checkboxInput(ctrl$stack$id, ctrl$stack$lab, TRUE),
             conditionalPanel(
               "input.stack == true",
-              checkboxInput(ctrl$fill$id, ctrl$fill$lab, value = FALSE)
+              checkboxInput(ctrl$fill$id, ctrl$fill$lab, FALSE)
             )
           )
         ),
@@ -75,8 +73,6 @@ fluidPage(
         )
       )
     ),
-    
-    # Summary table
     column(width = 3, wellPanel(tableOutput("sumtable")))
   ),
   
