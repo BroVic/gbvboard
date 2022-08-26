@@ -42,7 +42,7 @@ ctrl <-
     )
   )
 
-opts <- list(allopts = "All")
+allopts = "All"
 dbTables <- c(Facilities = "FacilitiesBasic")
 
 # projects <- 

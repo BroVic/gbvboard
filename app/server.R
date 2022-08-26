@@ -157,10 +157,9 @@ make_plot <- function(data, widgets) {
 
 
 
-# === Server function ===
+# === Server function ====
 function(input, output, session) {
   dtInput <- reactive({
-    
     grepcols <- function(rgx) {
       which(!grepl(rgx, names(df)))
     }
@@ -175,28 +174,39 @@ function(input, output, session) {
     # remove GPS coordinates from Facility data
     if (input[[ctrl$tables$id]] == "Facilities")
       df <- subset(df, select = grepcols("^gps_"))
+    # browser()
+    # control how Projects and States are presented as
+    # variables.
+    proj <- input[[ctrl$project$id]]
+    state <- input[[ctrl$state$id]]
     
-    if (input$state != opts$allopts)
-      df <- subset(df, State == input$state, select = -State)
+    if (proj != allopts)
+      df <- subset(df, Project == proj, select = -Project)
+    
+    if (state != allopts)
+      df <- subset(df, State == state, select = -State)
     
     set_types(df)
   },
   label = "Data initialization")
   
+  ## Observer for 'State' selector input widget
   observe({
     project <- input$proj
     
-    updateSelectInput(
-      session,
-      ctrl$state$id, 
-      ctrl$state$lab, 
-      choices = c(opts$allopts, projectStates[[project]])
-    )
+    opts <- if (project == allopts)
+      allopts
+    else
+      c(allopts, projectStates[[project]])
+    
+    updateSelectInput(session, ctrl$state$id, ctrl$state$lab, choices = opts)
   })
   
+  ## Observers for the input selectors for x- and y-axes
   rSelectOpts <- reactiveValues()
   
-  observe({    # x-variable control
+  ### x-variable
+  observe({
     rSelectOpts$x <- var_opts(dtInput())
     xval <- input$x
     
@@ -208,15 +218,14 @@ function(input, output, session) {
         xval <- yval
     }
     
-    update_var_control(
-      session,
-      ctrl$xvar$id,
-      choices = isolate(rSelectOpts$x),
-      selected = xval
-    )
+    update_var_control(session,
+                       ctrl$xvar$id,
+                       choices = isolate(rSelectOpts$x),
+                       selected = xval)
   })
   
-  observe({    # y-variable control
+  ### y-variable
+  observe({
     nms <- rSelectOpts$x
     x.val <- input$x
     
@@ -233,28 +242,32 @@ function(input, output, session) {
     )
   })
   
-  observeEvent(input$reset,
-               { 
-                 df <- isolate(dtInput())
-                 rSelectOpts$x <- var_opts(df)
-                 
-                 update_var_control(session,
-                                    ctrl$xvar$id,
-                                    choices = rSelectOpts$x,
-                                    selected = character(1))
-                 
-                 update_var_control(session,
-                                    ctrl$yvar$id,
-                                    choices = isolate(rSelectOpts$y),
-                                    selected = character(1))
-                 
-                 reset_plot_orientation(session, ctrl)
-               })
+  ## Event observer for resetting all the
+  ## selector input controls
+  observeEvent(input$reset, {
+    df <- isolate(dtInput())
+    rSelectOpts$x <- var_opts(df)
+    
+    update_var_control(session,
+                       ctrl$xvar$id,
+                       choices = rSelectOpts$x,
+                       selected = character(1))
+    
+    update_var_control(
+      session,
+      ctrl$yvar$id,
+      choices = isolate(rSelectOpts$y),
+      selected = character(1)
+    )
+    
+    reset_plot_orientation(session, ctrl)
+  })
   
-  observeEvent({
-    !input$stack
-  },
-  updateCheckboxInput(session, ctrl$fill$id, ctrl$fill$lab, value = FALSE))
+  observeEvent(
+    isFALSE(input$stack),
+    updateCheckboxInput(session, ctrl$fill$id, ctrl$fill$lab, value = FALSE)
+  )
+  
   
   varclass <- reactiveValues()
   
@@ -272,13 +285,16 @@ function(input, output, session) {
     
     y <- input$y
     
-    if (isTruthy(y)) 
+    if (isTruthy(y))
       varclass$Y <- .get_class(df, y)
   })
   
   observeEvent(input$invert, {
     upd <-
-      function(var, sel, ss = session, cc = isolate(rSelectOpts$x))
+      function(var,
+               sel,
+               ss = session,
+               cc = isolate(rSelectOpts$x))
         update_var_control(ss, var, choices = cc, selected = sel)
     
     upd(ctrl$xvar$id, isolate(input$y))
@@ -290,34 +306,30 @@ function(input, output, session) {
   #
   ## The main chart
   #################
-  rGgObj <- reactiveVal()
+  rGGobj <- reactiveVal()
   
   output$plot <- renderPlot({
-    
     if (!isTruthy(input$x))
       return()
     
     pp <- make_plot(dtInput(), input)
-    
-    rGgObj(pp)
-    isolate(rGgObj())
+    rGGobj(pp)
+    isolate(rGGobj())
   })
   
-  
+  ## For saving plots
   output$saveplot <- downloadHandler(
-    filename = function() {
-      paste("plot-", Sys.Date(), ".png", sep = "")
-    },
-    content = function(file) {
-      ggsave(file, isolate(rGgObj()))
-    }
+    filename = function()
+      paste("plot-", Sys.Date(), ".png", sep = ""),
+    content = function(file)
+      ggsave(file, isolate(rGGobj()))
   )
   
+  output$xvar <-
+    reactive(varclass$X, label = "Conditional panel ctrl")
+  output$yvar <-
+    reactive(varclass$Y, label = "Additional variable panel")
   
-  output$xvar <- reactive(varclass$X,
-                          label = "Conditional panel ctrl") 
-  output$yvar <- reactive(varclass$Y, 
-                          label = "Additional variable panel")
   outputOptions(output, "xvar", suspendWhenHidden = FALSE)
   outputOptions(output, "yvar", suspendWhenHidden = FALSE)
   
@@ -327,7 +339,6 @@ function(input, output, session) {
   ## The summary table
   ####################
   output$sumtable <- renderTable({
-    
     if (!isTruthy(input$x))
       return()
     
@@ -342,7 +353,6 @@ function(input, output, session) {
   ## The data table
   #################
   output$DT <- renderDataTable({
-    
     if (isFALSE(input$maindata))
       return()
     
