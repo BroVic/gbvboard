@@ -226,17 +226,17 @@ local({
     )
   
   varnames <- unname(opts$vars[var.index])
-  facilcol <- c("facility_id", varnames)
+  fac.col <- c("facility_id", varnames)
   
   # Convert Y/N variables to binary values
   # We have added one column to account for the 'facility_id' that was
   # added after the position of the booleans that were manually identified
   # from the variable list.
   bools <- c(38, 43:44, 46, 52:53, 56:57, 60:63, 65, 69, 81, 84) + 1L
-  bools <- facilcol[bools]
+  bools <- fac.col[bools]
   
-  facility.df <- alldata %>% 
-    select(all_of(facilcol)) %>% 
+  fac.df <- alldata %>% 
+    select(all_of(fac.col)) %>% 
     mutate(across(all_of(bools), make_boolean))
   
   tables <-
@@ -316,17 +316,17 @@ local({
   
   if (opts$name == "NFWP") {
     for (i in seq_along(y.tables)) {
-      facility.df <-
-        link_db_tables(facility.df, y.tables[i], by.x[i], "name", ref.col[i], dbpath)
+      fac.df <-
+        link_db_tables(fac.df, y.tables[i], by.x[i], "name", ref.col[i], dbpath)
     }
   }
   else {
-    facility.df <-
-      update_linked_tables(by.x, y.tables, ref.col, facility.df, dbpath, scrublist())
+    fac.df <-
+      update_linked_tables(by.x, y.tables, ref.col, fac.df, dbpath, scrublist())
   }
   
   # Add a column for 'Projects"
-  facility.df <- apply_project_id(facility.df, dbpath, opts$name)
+  fac.df <- apply_project_id(fac.df, dbpath, opts$name)
   
   # Merge reference tables with main one via their respective PK IDs
   all.interviewers <- read_from_db(dbpath, "Interviewer")
@@ -335,9 +335,9 @@ local({
   proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
   proj.interviewers[c('proj_id', "contact")] <- NULL 
   
-  facility.df <-
+  fac.df <-
     link_db_tables(
-      facility.df, 
+      fac.df, 
       proj.interviewers, 
       "interviewer_name", 
       "name", 
@@ -347,11 +347,11 @@ local({
   # For those variables for "referrals to" i.e. always/sometimes/never
   for(i in grep("^refto_", names(alldata), value = TRUE)) {
     refname <- paste0(i, "_id")
-    facility.df <-
-      link_db_tables(facility.df, "ReferralToOptions", i, "name", refname, dbpath)
+    fac.df <-
+      link_db_tables(fac.df, "ReferralToOptions", i, "name", refname, dbpath)
   }
   
-  append_to_db(facility.df, "Facility", dbpath)
+  append_to_db(fac.df, "Facility", dbpath)
 })
 
 local({

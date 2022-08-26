@@ -255,6 +255,15 @@ update_linked_tables <-
     argd <- 
       data.frame(var = fctnames, tbl = tblnames, refcol = refcolnames)
     
+    if (!is.null(scrublist)) {
+      
+      if (!is.vector(scrublist, "list"))
+        stop("'scrublist' must be a list")
+      
+      if (!identical(length(scrublist), length(fctnames)))
+        stop(" scrublist' and 'fctnames' must have the same length")
+    }
+    
     for (i in seq(nrow(argd))) {
       x <- argd$var[i]
       indx <- match(x, names(data))
@@ -271,9 +280,9 @@ update_linked_tables <-
         insert <- insertions[[indy]]
         names(insert) <- nmi
       }
-      
+            
       data[[indx]] <-
-        .createRefCol(x, y, data, db, scrub = scrublist, insert = insert, ...)
+        .createRefCol(x, y, data, db, scrubs = scrublist[[y]], insert = insert, ...)
       names(data)[indx] <- argd$refcol[i]
     }
     data
@@ -356,13 +365,11 @@ update_linked_tables <-
           dfcats <- dfcats[-x]
         }
       }
-      else if (!is.null(scrublist)) {
+      else if (!is.null(scrubs)) {
         
-        scrub <- scrubs[[tblname]]
-        
-        for (i in seq(nrow(scrub))) {
-          pat <- scrub[i, 1]
-          rep <- scrub[i, 2]
+        for (i in seq(nrow(scrubs))) {
+          pat <- scrubs[i, 1]
+          rep <- scrubs[i, 2]
           
           if (pat == "" && rep == "")
             next
@@ -573,21 +580,19 @@ inspect_data <- function(base, new) {
 scrublist <- function(context = NULL, tables = character(), insert = NULL) {
   slist <- list(
     facility = list(
-      cbind(
+      AgeGrp = cbind(
         c(
           "adults_and_children",
           "only_adults__18_and_over",
           "only_children__under_18"
         ),
-        c(
-          "Adults and children",
+        c("Adults and children",
           "Only adults",
-          "Only children"
-        )
+          "Only children")
       ),
-      cbind(
+      OrgTypes = cbind(
         c(
-          "governmental__please_specify_m|Governmental (Please specify ministry or service)",
+          "governmental__please_specify_m|Governmental \\(Please specify ministry or service\\)",
           "international_ngo",
           "other__describe",
           "faith_based_organization",
@@ -603,15 +608,13 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
           "Community-based organization"
         )
       ),
-      cbind(
+      OpenAccess = cbind(
         c("yes__open_24_7", "no__only_open_during_certain_h"),
         c("Yes, open 24/7", "No, only open during certain hours")
       ),
-      cbind(
-        "^No.*$", 
-        "No, respondent is unable to show them"
-      ),
-      cbind(
+      DocsAreShown = cbind("^No.*$",
+                           "No, respondent is unable to show them"),
+      DataStorage = cbind(
         c(
           "only_physical_data_are_stored",
           "both_electronic_and_physical_s",
@@ -623,11 +626,11 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
           "Only electronic storage of data"
         )
       ),
-      cbind("Don_t_know", "Don't Know"),
-      cbind("", ""),
-      cbind("^Yes.*$", "Yes, always"),
-      cbind("", ""),
-      cbind(
+      PrivateQuesOpts = cbind("Don_t_know", "Don't Know"),
+      Electronicstore = cbind("", ""),
+      ContactAuthority = cbind("^Yes.*$", "Yes, always"),
+      SignedCOC = cbind("", ""),
+      UpdateRefdir = cbind(
         c(
           "every_six_months_or_less",
           "it_has_never_been_updated",
@@ -641,23 +644,27 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
           "More than a year"
         )
       ),
-      cbind("Don_t_know", "Don't Know"),
-      cbind("", ""),
-      cbind("", ""),
-      cbind("", "")
+      ChooseTreatment = cbind("Don_t_know", "Don't Know"),
+      States = cbind("", ""),
+      LGAs = cbind("", ""),
+      Devices = cbind("", "")
     ),
     
     legal = list(
-      cbind("Pay.+", "Paid"),
-      cbind(
-        c("the_case_is_transferred_to_ano",
+      CostOpts = cbind("Pay.+", "Paid"),
+      ActionNoresrc = cbind(
+        c(
+          "the_case_is_transferred_to_ano",
           "other",
           "the_survivor_is_asked_to_pay",
-          "the_case_is_closed"),
-        c("The case is transferred to another organization",
+          "the_case_is_closed"
+        ),
+        c(
+          "The case is transferred to another organization",
           "Other",
           "The survivor is asked to pay",
-          "The case is closed")
+          "The case is closed"
+        )
       )
     )
   )
@@ -667,7 +674,7 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
   else
     tolower(context)
     
-  obj <- structure(slist[[context]], names = tables)
+  slist[[context]]
   
   # Add up the values used to update the DB table
   # so that they are used in the comparisons
@@ -675,7 +682,6 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
   #   nm <- names(insert)
   #   obj[[nm]] <- c(obj[[nm]], insert)
   # }
-  obj
 }
 
 
