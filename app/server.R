@@ -352,7 +352,7 @@ function(input, output, session) {
   #################
   ## The data table
   #################
-  output$DT <- renderDataTable({
+  output$DT <- DT::renderDataTable({
     if (isFALSE(input$maindata))
       return()
     
