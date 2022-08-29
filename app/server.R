@@ -166,7 +166,13 @@ function(input, output, session) {
     
     tbl <- dbTables[[input$dbtbl]]
     qry <- sprintf("SELECT * FROM %s;", tbl)
-    df <- fetch_data(qry, "data.db")
+    
+    db <- if (interactive())
+      "data.db"
+    else
+      paste0(tolower(tbl), ".db")
+    
+    df <- fetch_data(qry, db)
     
     # get rid of 'id' columns
     df <- subset(df, select = grepcols("_id$"))
@@ -352,7 +358,7 @@ function(input, output, session) {
   #################
   ## The data table
   #################
-  output$DT <- renderDataTable({
+  output$DT <- DT::renderDataTable({
     if (isFALSE(input$maindata))
       return()
     

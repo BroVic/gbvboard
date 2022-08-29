@@ -704,3 +704,31 @@ apply_project_id <- function(df, db, proj.name, proj.id.name = "proj_id") {
   df[[proj.id.name]] <- proj.id.no
   df
 }
+
+
+## Uses a given view to create a separate database file that can be used to
+## export the app to a remote server.
+get_view <- function(db, view)
+{
+  require(RSQLite, quietly = TRUE)
+  
+  if (!file.exists(db))
+    stop("'db' does not exist")
+  
+  tryCatch({
+    con <- dbConnect(SQLite(), db)
+    tbl <- dbReadTable(con, view)
+  }, finally = dbDisconnect(con))
+  
+  tryCatch(
+    error = function(e)
+      stop(e),
+    {
+      db2 <- here::here(sprintf("app/%s.db", tolower(view)))
+      con2 <- dbConnect(SQLite(), db2)
+      dbWriteTable(con2, view, tbl)
+    },
+    finally = dbDisconnect(con2)
+  )
+  invisible(db2)
+}

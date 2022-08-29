@@ -1,0 +1,14 @@
+name: gbvboard
+title: gbvboard
+username:
+account: victorordu
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 6868597
+bundleId: 6247867
+url: https://victorordu.shinyapps.io/gbvboard/
+when: 1661776566.63946
+lastSyncTime: 1661776566.63946
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: data.db
