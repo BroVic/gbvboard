@@ -8,101 +8,50 @@
 # data from the project. We are using cleaned/transformed data 
 
 # Dependencies ----
-here::i_am(script.path <- "util/sql/initdb.R")
-suppressPackageStartupMessages(library(here))
-
-helperfile <- "dbfuns.R"
-
-if (getwd() == here())
-  helperfile <- file.path(dirname(script.path), helperfile)
-
-source(helperfile)
-
 library(tidyr)
 library(purrr)
 library(labelled)
 library(jGBV, quietly = TRUE)
 library(dplyr, warn.conflicts = FALSE)
+suppressPackageStartupMessages(library(here))
 
+source(here("util/sql/dbfuns.R"))
 
 # Project Data ----
 ## Fetch inputs
-params <- commandArgs(trailingOnly = TRUE)
-
 dir <- if (interactive()) {
-  rs.proj <- file.choose()
-  if (!endsWith(rs.proj, ".Rproj"))
-    stop("Selected file is not an RStudio project file")
-  dirname(rs.proj)
+  gbvprojects <- c("NFWP", "NEDC")
+  p <- menu(gbvprojects, TRUE, "Pick a project")
+  root <- dirname(here())
+  file.path(root, gbvprojects[p])
 } else {
+  params <- commandArgs(trailingOnly = TRUE)
   params[1]
 }
 
-if (is.na(dir) || identical(dir, ""))
-  stop("No project directory chosen")
-
-if (!dir.exists(dir))
-  stop("Directory", sQuote(dir), "does not exist")
-
 dir <- normalizePath(dir, winslash = "/")
-
 opts <- get_project_options(dir)
+var.rgx <- as.list(opts$regex)
 opts$vars <- jGBV::new.varnames
 
-dbpath <- file.path(dir, "data", paste0(tolower(basename(dir)), ".db"))
-if (!file.exists(dbpath))
-  stop("The database ", sQuote(dbpath), " does not exist")
-
 ## Fetch the data
-states <- opts$states
-alldata <- combine_project_data(opts$name, opts$states, dbpath)
+dbpath <- file.path(dir, "data", paste0(tolower(basename(dir)), ".db"))
+alldata <- combine_project_data(opts, dbpath)
 
 ## Clean up bad State entry for NEDC project
-if (opts$name == "NEDC")
+if (opts$name == "NEDC") {
   alldata <- 
     transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
+}
 
-## Apply variable labels
-var_label(alldata) <- 
-  var_label(load_data(dbpath, states[1], vars = opts$vars), unlist = TRUE)
-
-var.rgx <- as.list(opts$regex)
-
-## Some of the variable are converted to factors by `loadData`; we don't 
-## want this for the purposes of creating the database.
-factorvars <-
-  opts$vars[c("start",
-              "end",
-              "today",
-              "opstart",
-              "gbvstart",
-              "age",
-              "update.refdir")]
-
-
-# Get the primary key i.e. the ID column from the 'Facility' table in the 
-# database and apply it to the main data frame, so that it can be used as
-# a reference in subsequent operations. 
-
-# Change to app database
-dbpath <- here::here("app/data.db")
-
-if (!file.exists(dbpath))
-  stop(sQuote(dbpath), " does not exist")
-
-nrw <- query_db(dbpath, "SELECT MAX(facility_id) FROM Facility;")[1, 1]
-
-if (is.na(nrw))
-  nrw <- 0L
-  
-alldata <- alldata %>%
-  mutate(facility_id = nrw + seq(nrow(.))) %>%  # we set this to reference other tables
-  mutate(across(contains(factorvars), as.character))
-
-
+# Change focus to app database.
+# We will use the existing database tables 
+# to set a main ID column which represents the
+# individual facilities.
+dbpath <- here("app/data.db")
+alldata <- set_facility_id_col(alldata, dbpath)
 
 # Table operations ----
-
 ## We start by populating the Project and States tables
 proj <- data.frame(name = opts$name, year = opts$year)
 try( append_to_db(proj, tbl = "Projects", dbpath) )
@@ -123,121 +72,108 @@ local({
 # The Interviewers
 local({
   ivars <- opts$vars[c('interviewer', 'interviewer.contact')]
-  ra <- alldata[, ivars]
-  ra.name <- ra[[ivars[1]]]
-  ra <- ra[!duplicated(ra.name), ]
-  names(ra) <- c("name", "contact")
-  ra <- apply_project_id(ra, dbpath, opts$name)
-  
-  append_to_db(ra, "Interviewer", dbpath)
+  interviewer <- alldata[, ivars]
+  interviewer.name <- interviewer[[ivars[1]]]
+  interviewer <- interviewer[!duplicated(interviewer.name), ]
+  names(interviewer) <- c("name", "contact")
+  interviewer <- apply_project_id(interviewer, dbpath, opts$name)
+  append_to_db(interviewer, "Interviewer", dbpath)
 })
 
-# Facility-specific data
+# Facility-specific data ----
 local({
   var.index <- 
     c(
-      "start",
-      "end",
-      "today",
-      "has.office",
-      "has.phone",
-      "continue",
-      "consent",
-      "orgname",
-      "opstart",
-      "gbvstart",
-      "state",               # FK
-      "lga",                 # FK
-      "ward",
-      "address",
-      "phone",
-      "email",
-      "interviewer",         # FK
-      "device.id",           # FK
-      "staffname",
-      "title",
-      "info",
-      "gps.long",
-      "gps.lat",
-      "gps.alt",
-      "gps.prec",
-      "age",                 # FK
-      "org.type",            # FK
-      "govt.spec",
-      "oth.org.type",
-      "open.247",
-      "open.time",
-      "close.time",
-      "oth.gbv.dscrb",
-      "oth.fund.dscrb",
-      "fulltime.staff",
-      "partime.staff",
-      "female.staff",
-      "uses.docs"   ,        # bool
-      "showed.docs",         # FK
-      "doc.photo",
-      "oth.docs.dscrb",
-      "process.nodoc",
-      "child.docs",          # bool
-      "standard.forms",      # bool
-      "how.data",            # FK
-      "data.is.stored",      # bool
-      "computer.secured",    # FK 
-      "contact.authority",   # FK
-      "why.contact",     
-      "contact.case",
-      "contact.authtype",
-      "priv",                # bool
-      "priv.room",           # bool
-      "private.ques",        # FK
-      "details.miss.equip",
-      "serve.disabled",      # bool
-      "disabled.special",    # bool
-      "oth.disabl.dscrb",
-      "coc.signed",          # FK
-      "coc.copies",          # bool
-      "coc.confidentiality", # bool
-      "coc.equity",          # bool
-      "has.focalperson",     # bool
-      "focalperson.contact",
-      "has.gbv.trained",     # bool
-      "num.gbv.trained",
-      "who.gbv.trained",
-      "which.gbv.trained",
-      "has.refdir",          # bool
-      "refdir.pic",
-      "refto.health",        # FK
-      "refto.psych",         # FK
-      "refto.police",        # FK
-      "refto.legal",         # FK
-      "refto.shelt",         # FK
-      "refto.econ",          # FK
-      "refto.other",         # FK
-      "oth.refto.dscrb",
-      "update.refdir",       # FK
-      "gbvcase.contact",
-      "choose.referral",     # bool
-      "why.nochoose.ref",
-      "choose.treatment",    # FK
-      "coordination",        # bool
-      "which.coord",
-      "comment.coord",
-      "service.othersdetail"
+      field = "start",
+      field = "end",
+      field = "today",
+      field = "has.office",
+      field = "has.phone",
+      field = "continue",
+      field = "consent",
+      field = "orgname",
+      field = "opstart",
+      field = "gbvstart",
+      fkey = "state",
+      fkey = "lga",
+      field = "ward",
+      field = "address",
+      field = "phone",
+      field = "email",
+      fkey = "interviewer",
+      fkey = "device.id",
+      field = "staffname",
+      field = "title",
+      field = "info",
+      field = "gps.long",
+      field = "gps.lat",
+      field = "gps.alt",
+      field = "gps.prec",
+      fkey = "age",
+      fkey = "org.type",
+      field = "govt.spec",
+      field = "oth.org.type",
+      field = "open.247",
+      field = "open.time",
+      field = "close.time",
+      field = "oth.gbv.dscrb",
+      field = "oth.fund.dscrb",
+      field = "fulltime.staff",
+      field = "partime.staff",
+      field = "female.staff",
+      bool = "uses.docs",
+      fkey = "showed.docs",
+      field = "doc.photo",
+      field = "oth.docs.dscrb",
+      field = "process.nodoc",
+      bool = "child.docs",
+      bool = "standard.forms",
+      fkey = "how.data",
+      bool = "data.is.stored",
+      fkey = "computer.secured",
+      fkey = "contact.authority",
+      field = "why.contact",     
+      field = "contact.case",
+      field = "contact.authtype",
+      bool = "priv",
+      bool = "priv.room",
+      fkey = "private.ques",
+      field = "details.miss.equip",
+      bool = "serve.disabled",
+      bool = "disabled.special",
+      field = "oth.disabl.dscrb",
+      fkey = "coc.signed",
+      bool = "coc.copies",          
+      bool = "coc.confidentiality", 
+      bool = "coc.equity",          
+      bool = "has.focalperson",     
+      field = "focalperson.contact",
+      bool = "has.gbv.trained",     
+      field = "num.gbv.trained",
+      field = "who.gbv.trained",
+      field = "which.gbv.trained",
+      bool = "has.refdir",          
+      field = "refdir.pic",
+      fkey = "refto.health",        
+      fkey = "refto.psych",         
+      fkey = "refto.police",        
+      fkey = "refto.legal",         
+      fkey = "refto.shelt",         
+      fkey = "refto.econ",          
+      fkey = "refto.other",         
+      field = "oth.refto.dscrb",
+      fkey = "update.refdir",       
+      field = "gbvcase.contact",
+      bool = "choose.referral",     
+      field = "why.nochoose.ref",
+      fkey = "choose.treatment",    
+      bool = "coordination",        
+      field = "which.coord",
+      field = "comment.coord",
+      field = "service.othersdetail"
     )
   
-  varnames <- unname(opts$vars[var.index])
-  fac.col <- c("facility_id", varnames)
-  
-  # Convert Y/N variables to binary values
-  # We have added one column to account for the 'facility_id' that was
-  # added after the position of the booleans that were manually identified
-  # from the variable list.
-  bools <- c(38, 43:44, 46, 52:53, 56:57, 60:63, 65, 69, 81, 84) + 1L
-  bools <- fac.col[bools]
-  
-  fac.df <- alldata %>% 
-    select(all_of(fac.col)) %>% 
-    mutate(across(all_of(bools), make_boolean))
+  fac.df <- make_pivot_tabledf(alldata, var.index)
   
   tables <-
     c(
@@ -254,6 +190,7 @@ local({
       "ChooseTreatment",
       "ShowDocs"
     )
+  
   factor.indx <- c(
     "age",
     "org.type", 
@@ -269,33 +206,31 @@ local({
     "showed.docs"
   )
   
-  cat.vars <- opts$vars[factor.indx]
-  
   if (opts$name == "NFWP") {
-    invisible(
-      walk2(cat.vars,
-            tables,
-            create_singleresponse_tbl,
-            data = alldata,
-            db = dbpath)
-    )
+    cat.vars <- opts$vars[factor.indx]
     
-    create_singleresponse_tbl(
-      c("Always", "Sometimes", "Never"), 
-      "ReferralToOptions",
-      alldata,
-      dbpath
-    )
+    walk2(cat.vars,
+          tables,
+          create_singleresponse_tbl,
+          data = alldata,
+          db = dbpath)
+    
+    create_singleresponse_tbl(c("Always", "Sometimes", "Never"),
+                              "ReferralToOptions",
+                              alldata,
+                              dbpath)
   }
   
   ## NB: `link_db_tables` can work with a table name OR a session data frame!
   last.element <- length(tables)
   tables <- tables[-last.element]
-  factor.indx <- factor.indx[-last.element]
-  
-  factor.indx <- c(factor.indx, "state", "lga", "device.id")
   y.tables <- c(tables, "States", "LGAs", "Devices")
+  
+  factor.indx <- factor.indx[-last.element] |>
+    c("state", "lga", "device.id")
+  
   by.x <- unname(opts$vars[factor.indx])
+  
   ref.col <-
     c(
       "agegrp_id",
@@ -315,14 +250,16 @@ local({
     )
   
   if (opts$name == "NFWP") {
+    
     for (i in seq_along(y.tables)) {
-      fac.df <-
-        link_db_tables(fac.df, y.tables[i], by.x[i], "name", ref.col[i], dbpath)
+      fac.df <- fac.df |>
+        link_db_tables(y.tables[i], by.x[i], "name", ref.col[i], dbpath)
     }
+    
   }
   else {
-    fac.df <-
-      update_linked_tables(by.x, y.tables, ref.col, fac.df, dbpath, scrublist())
+    fac.df <- fac.df |>
+      update_linked_tables(y.tables, by.x, ref.col, dbpath, scrublist())
   }
   
   # Add a column for 'Projects"
@@ -353,6 +290,7 @@ local({
   
   append_to_db(fac.df, "Facility", dbpath)
 })
+
 
 local({
   rgx.index <-
@@ -394,38 +332,35 @@ local({
   
   var.index <-  
     c(
-      "hf.type",                   # FK
-      "hf.type.others",
-      "oth.srvhealth.dscrb",
-      "total.health",
-      "has.pep",                   # bool
-      "has.no.pep",
-      "has.contracep",             # bool
-      "has.no.contracep",
-      "health.paid",               # FK
-      "access.srv",                # bool
-      "healthfee.clin",
-      "healthfee.inj",
-      "healthfee.pep",
-      "healthfee.contra",
-      "healthfee.hiv",
-      "healthfee.sti",
-      "healthfee.foren",
-      "healthfee.psych",
-      "healthfee.case",
-      "healthfee.basic",
-      "healthfee.other",
-      "forms.yes",                 # bool
-      "comment.elem",
-      "comment.suppl",
-      "oth.hlthtrain.dscrb",
-      "qual.staff"
+      fkey = "hf.type",                   
+      field = "hf.type.others",
+      field = "oth.srvhealth.dscrb",
+      field = "total.health",
+      bool = "has.pep",                   
+      field = "has.no.pep",
+      bool = "has.contracep",             
+      field = "has.no.contracep",
+      fkey = "health.paid",               
+      bool = "access.srv",                
+      field = "healthfee.clin",
+      field = "healthfee.inj",
+      field = "healthfee.pep",
+      field = "healthfee.contra",
+      field = "healthfee.hiv",
+      field = "healthfee.sti",
+      field = "healthfee.foren",
+      field = "healthfee.psych",
+      field = "healthfee.case",
+      field = "healthfee.basic",
+      field = "healthfee.other",
+      bool = "forms.yes",                 
+      field = "comment.elem",
+      field = "comment.suppl",
+      field = "oth.hlthtrain.dscrb",
+      field = "qual.staff"
     )
-  varnames <- opts$vars[var.index]
-  health.cols <- unname(c("facility_id", varnames))
-  booleans <- health.cols[c(6, 8, 11, 23)]
   
-  h.data <- filter_alldata(alldata, srvtype_health, health.cols, booleans)
+  h.data <- make_pivot_tabledf(alldata, var.index, "srvtype_health")
   
   rgx.index <-
     c("health.services",
@@ -433,12 +368,14 @@ local({
       "supplies",
       "form.types",
       "trained.health")
+  
   tables <-
     c("HealthServices",
       "Elements",
       "Medicines",
       "HealthForm",
       "TrainedHealth")
+  
   bridges <-
     c(
       "HealthservicesFacility",
@@ -450,6 +387,7 @@ local({
   
   for (i in seq_along(tables)) {
     col <- var.rgx[[rgx.index[i]]]
+    
     try(
       create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
     )
@@ -462,13 +400,15 @@ local({
   if (opts$name == "NFWP") {
     for (i in seq_along(tables)) {
       create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
-      h.data <- 
-        link_db_tables(h.data, tables[i], variables[i], "name", ref.col[i], dbpath)
+      h.data <- h.data |>
+        link_db_tables(tables[i], variables[i], "name", ref.col[i], dbpath)
     }
   }
   else {
-    h.data <- update_linked_tables(variables, tables, ref.col, h.data, dbpath)
+    h.data <- h.data |>
+      update_linked_tables(tables, variables, ref.col, dbpath)
   }
+  
   append_to_db(h.data, "Health", dbpath)
 })
 
@@ -479,26 +419,23 @@ local({
   
   var.index <-
     c(
-      "oth.srvleg.dscrb",
-      "total.legal",
-      "legal.paid",                # FK
-      "legal.access", 
-      "legalfee.consult",
-      "legalfee.rep",
-      "legalfee.court",
-      "legalfee.med",
-      "legalfee.secur",
-      "legalfee.counsel",
-      "legalfee.other",
-      "support.for.court",         # bool
-      "no.resources1",             # FK
-      "no.resources2"
+      field = "oth.srvleg.dscrb",
+      field = "total.legal",
+      fkey = "legal.paid",                
+      field = "legal.access", 
+      field = "legalfee.consult",
+      field = "legalfee.rep",
+      field = "legalfee.court",
+      field = "legalfee.med",
+      field = "legalfee.secur",
+      field = "legalfee.counsel",
+      field = "legalfee.other",
+      bool = "support.for.court",         
+      fkey = "no.resources1",             
+      field = "no.resources2"
     )
-  varnames <- opts$vars[var.index]
-  legcol <- unname(c("facility_id", varnames))
-  booleans <- legcol[c(5, 12)]
   
-  l.data <- filter_alldata(alldata, srvtype_legal, legcol, booleans)
+  l.data <- make_pivot_tabledf(alldata, var.index, serv.type = "srvtype_legal")
   
   create_multiresponse_group(var.rgx[['legal.services']],
                              "LegalServices", 
@@ -521,8 +458,8 @@ local({
       create_singleresponse_tbl(v[i], t[i], l.data, dbpath)
     
     for (i in seq_along(tables))
-      l.data <- 
-        link_db_tables(l.data, tables[i], varnames[i], "name", ref.col[i], dbpath)
+      l.data <- l.data |>
+        link_db_tables(tables[i], varnames[i], "name", ref.col[i], dbpath)
   }
   else {
     new.value <- if (opts$name == "NEDC")
@@ -530,15 +467,8 @@ local({
     
     scrubs <- scrublist(context, tables, new.value)
     
-    l.data <- update_linked_tables(
-      fctnames = varnames,
-      tblnames = tables,
-      refcolnames = ref.col,
-      data = l.data,
-      db = dbpath,
-      scrublist = scrubs,
-      insertions = new.value
-    )
+    l.data <- l.data |>
+      update_linked_tables(tables, varnames, ref.col, dbpath, scrubs, new.value)
   }
   append_to_db(l.data, context, dbpath)
 })
@@ -549,22 +479,20 @@ local({
 local({
   var.index <- 
     c(
-      "oth.srvpsy.dscrb",
-      "total.psychosocial",
-      "psych.paid",              # FK
-      "psych.access",
-      "psychfee.counsel",
-      "psychfee.case",
-      "psychfee.therapy",
-      "psychfee.safety",
-      "psychfee.other",
-      "oth.psychtrain.dscrb",
-      "qualstaff.id"
+      field = "oth.srvpsy.dscrb",
+      field = "total.psychosocial",
+      fkey = "psych.paid",              
+      field = "psych.access",
+      field = "psychfee.counsel",
+      field = "psychfee.case",
+      field = "psychfee.therapy",
+      field = "psychfee.safety",
+      field = "psychfee.other",
+      field = "oth.psychtrain.dscrb",
+      field = "qualstaff.id"
     )
-  varnames <- opts$vars[var.index]
-  psy.col <- unname(c("facility_id", varnames))
-  psy.data <- filter_alldata(alldata, srvtype_psych, psy.col)
-
+  
+  psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_psych')
   rgx.index <- c("psychosoc.services", "trained.psychosoc")
   tables <- c("PsychoServices", "PsychoTrain")
   bridges <- c("PsychoservicesFacility", "PsychotrainFacility")
@@ -581,7 +509,7 @@ local({
   psy.data <- if (opts$name == "NFWP")
     link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees, dbpath)
   else
-    update_linked_tables(fees, tbl.costs, ref.fees, psy.data, dbpath)
+    update_linked_tables(psy.data, tbl.costs, fees, ref.fees, dbpath)
   
   append_to_db(psy.data, "Psychosocial", dbpath)
 })
@@ -591,34 +519,31 @@ local({
 local({
   var.index <-
     c(
-      "oth.srvpol.dscrb",
-      "gbv.police",                 # bool
-      "who.gbvpolice",
-      "refer.otherpolice",          # bool
-      "trainedpolice.id",
-      "total.police.rape",
-      "total.police.ipv",
-      "total.police.csa",
-      "total.police.fgm",
-      "total.police.oth",
-      "oth.polnum.dscrb",
-      "police.fees",                # FK
-      "police.access",
-      "policefee.case",
-      "policefee.safety",
-      "policefee.other",
-      "oth.policeresrc.dscrb",
-      "police.followup",            # bool
-      "police.confidential"
+      field = "oth.srvpol.dscrb",
+      bool = "gbv.police",                 
+      field = "who.gbvpolice",
+      bool = "refer.otherpolice",          
+      field = "trainedpolice.id",
+      field = "total.police.rape",
+      field = "total.police.ipv",
+      field = "total.police.csa",
+      field = "total.police.fgm",
+      field = "total.police.oth",
+      field = "oth.polnum.dscrb",
+      fkey = "police.fees",                
+      field = "police.access",
+      field = "policefee.case",
+      field = "policefee.safety",
+      field = "policefee.other",
+      field = "oth.policeresrc.dscrb",
+      bool = "police.followup",            
+      field = "police.confidential"
     )
-  varnames <- opts$vars[var.index]
-  pol.col <- unname(c("facility_id", varnames))
-  booleans <- pol.col[c(3, 5, 19)]
-  pol.data <- filter_alldata(alldata, srvtype_police, pol.col, booleans)
   
-  rgx.index <-
-    c("police.services", "trained.police", "resources.police")
+  psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_police')
+  rgx.index <- c("police.services", "trained.police", "resources.police")
   tables <- c("PoliceServices", "TrainedPolice", "PoliceResources")
+  
   bridges <-
     c("PoliceservicesFacility",
       "TrainedpoliceFacility",
@@ -628,8 +553,13 @@ local({
     col <- var.rgx[[rgx.index[i]]]
     create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
   }
-  pol.data <-
-    link_db_tables(pol.data, "CostOpts", "police_fees", "name", "policefees_id", dbpath)
+  
+  pol.data <- link_db_tables(pol.data,
+                             "CostOpts",
+                             "police_fees",
+                             "name",
+                             "policefees_id",
+                             dbpath)
   
   append_to_db(pol.data, "Police", dbpath)
   
@@ -642,26 +572,23 @@ local({
 local({
   var.index <- 
     c(
-      "health.srvshelt.dscrb",
-      "oth.srvshelt.dscrb",
-      "shelter.famfriendly",        # bool
-      "shelter.kidfriendly",        # bool
-      "oth.sheltpriv.dscrb",
-      "oth.sheltamen.dscrb",
-      "electricwater",              # FK
-      "total.shelter.f",
-      "total.shelter.m",
-      "shelter.support",            # bool
-      "shelter.new.support"         # bool
+      field = "health.srvshelt.dscrb",
+      field = "oth.srvshelt.dscrb",
+      bool = "shelter.famfriendly",        
+      bool = "shelter.kidfriendly",        
+      field = "oth.sheltpriv.dscrb",
+      field = "oth.sheltamen.dscrb",
+      fkey = "electricwater",              
+      field = "total.shelter.f",
+      field = "total.shelter.m",
+      bool = "shelter.support",            
+      bool = "shelter.new.support"         
     )
-  varnames <- unname(opts$vars[var.index])
-  shel.col <- c("facility_id", varnames)
-  booleans <- shel.col[c(4:5, 11:12)]
-  shel.data <- filter_alldata(alldata, srvtype_shelt, shel.col, booleans)
-  
-  rgx.index <- 
-    c("shelter.services", "privacy.shelter", "amenities.shelter")
+ 
+  shel.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_shelt')
+  rgx.index <- c("shelter.services", "privacy.shelter", "amenities.shelter")
   tables <- c("ShelterServices", "ShelterPrivacy", "ShelterAmenities")
+  
   bridges <-
     c("ShelterservicesFacility",
       "ShelterprivacyFacility",
@@ -671,6 +598,7 @@ local({
     col <- var.rgx[[rgx.index[i]]]
     create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
   }
+  
   varname <- unname(opts$vars['electricwater'])
   elec.tbl <- "ElectricWater"
   create_singleresponse_tbl(varname, elec.tbl, shel.data, dbpath)
@@ -687,15 +615,13 @@ local({
 local({
   var.index <- 
     c(
-      "oth.srvecon.dscrb",
-      "total.economic",
-      "econ.areas",               # bool
-      "econ.reject"               # bool
+      field = "oth.srvecon.dscrb",
+      field = "total.economic",
+      bool = "econ.areas",               
+      bool = "econ.reject"               
     )
-  varnames <- opts$vars[var.index]
-  econ.col <- unname(c("facility_id", varnames))
-  booleans <- econ.col[4:5]
-  econ.data <- filter_alldata(alldata, srvtype_econ, econ.col, booleans)
+  
+  econ.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_econ')
   
   create_multiresponse_group(var.rgx[['economic.services']],
                              "EconServices",

@@ -22,26 +22,117 @@ loadData <-
 # Runs an SQL query on the database, generically.
 query_db <- function(db, qry)
 {
+  require(RSQLite, quietly = TRUE)
+  
   if (!file.exists(db))
     stop("'db' does not exist")
+  
   if (!is.character(qry) || length(qry) > 1L)
     stop("'qry' must be a character vector of length 1")
-  require(RSQLite)
+  
   tryCatch({
     dbcon <- dbConnect(SQLite(), db)
     r <- dbSendStatement(dbcon, qry)
     res <- dbFetch(r)
   },
-  error = function(e)
-    stop(e, call. = FALSE),
+  error = function(e) {
+    stop(e, call. = FALSE)
+  },
   finally = {
     if (exists('r', envir = environment()))
       dbClearResult(r)
+    
     dbDisconnect(dbcon)
   })
+  
   invisible(res)
 }
 
+
+
+
+# Fetches the elements with the same name
+extract_elements <- function(x, name) {
+  if (length(x) == 0L)
+    stop("Cannot index into a zero-length vector")
+  
+  names.x <- names(x)
+  
+  if (is.null(names.x))
+    stop("'x' is not named")
+  
+  if (length(name) > 1L) {
+    name <- name[1]
+    warning("Only the first element of 'name' was used")
+  }
+  
+  if (!name %in% names.x)
+    stop("'name' is not a name in 'x'")
+  
+  i <- grep(name, names.x)
+  
+  if (max(i) > length(x) || sign(min(i)) == -1)
+    stop("Subscript is indexing beyond the bounds of 'x'")
+  
+  x[i]
+}
+
+
+
+# Starts off the field names with the 'facility_id'
+add_fac_id <- function(x) {
+  if (!is.character(x))
+    stop("The indices used are character strings")
+  
+  vars <- jGBV::new.varnames[x]
+  c(facility.id = "facility_id", vars)
+}
+
+
+
+
+
+# we set this to reference other tables
+set_facility_id_col <- function(data, db) {
+  stopifnot(is.data.frame(data), file.exists(db))
+  result <- query_db(db, "SELECT MAX(facility_id) FROM Facility;")
+  nrw <- result[1, 1]
+  
+  if (is.na(nrw))
+    nrw <- 0L
+  
+  data %>% mutate(facility_id = nrw + seq(nrow(.)))
+  
+}
+
+
+
+
+make_pivot_tabledf <- function(data, var.indices, serv.type = NULL) {
+  stopifnot(is.data.frame(data))
+  nvn <- jGBV::new.varnames
+  
+  if (!all(var.indices %in% names(nvn)))
+    stop("'var.indices' must be names of 'jGBV::new.varnames'")
+  
+  if (!is.null(serv.type)) {
+    if (!is.character(serv.type) || length(serv.type) != 1L)
+      stop("'serv.type' supplied is not a string")
+    
+    expected.start <- "srvtyp"
+    
+    if (!startsWith(serv.type, expected.start))
+      stop(paste(
+        "'serv.type' is not a variable starting with",
+        sQuote(expected.start)
+      ))
+  }
+  
+  varnames <- add_fac_id(var.indices)
+  bools <- extract_elements(var.indices, 'bool')
+  
+  filter_alldata(data, serv.type, varnames, bools)
+}
 
 
 
@@ -244,10 +335,10 @@ create_singleresponse_tbl <- function(col, tblname, data, db) {
 
 
 update_linked_tables <-
-  function(fctnames,
+  function(data,
            tblnames,
+           fctnames,
            refcolnames,
-           data,
            db,
            scrublist = NULL,
            insertions = NULL,
@@ -408,16 +499,26 @@ filter_alldata <- function(data, service.col, selected, bools = NULL) {
   if (!is.data.frame(data))
     stop("'data' must be a data frame")
   
-  srvcol <- enexpr(service.col)
+  if (!is.null(service.col)) {
+    filtered.rows <- data[[service.col]] == 1
+    data <- data[filtered.rows,]
+  }
   
-  ret <- data %>%
-    filter(!!srvcol == 1) %>%
-    select(facility_id, all_of(selected))
+  # If we don't unname `selected` here, it's names
+  # are passed on to the selected columns, thereby
+  # distorting the original names of the structure.
+  usel <- unname(selected)
+  data <- select(data, all_of(usel))
   
   if (is.null(bools))
-    return(ret)
+    return(data)
   
-  mutate(ret, across(all_of(bools), make_boolean))
+  # The boolean-designate columns are fished out using
+  # the names of the monitoring variable jGBV::new.varnames,
+  # which at this pointed is in a shorter version, the object
+  # `selected`.
+  ubools <- unname(selected[bools])
+  mutate(data, across(all_of(ubools), make_boolean))
 }
 
 
@@ -484,8 +585,7 @@ transform_mismatched <- function(data, projectname) {
     })
   }, 
   error = function(e) {
-    warning(conditionMessage(e), call. = FALSE)
-    data
+    stop(e)
   })
 }
 
@@ -529,28 +629,36 @@ get_project_options <- function(dir, reset = FALSE) {
 
 
 
-combine_project_data <- function(name, states, database) {
-  require(dplyr, warn.conflicts = FALSE)
+combine_project_data <- function(proj.opts, database) {
+  require(purrr, warn.conflicts = FALSE)
+  require(jGBV, quietly = TRUE)
   
-  states |>
-    lapply(function(s) {
-      
+  if (!file.exists(database))
+    stop("The database ", sQuote(database), " does not exist")
+  
+  states <- proj.opts$states
+  # labs <- NULL
+  
+  comb <- states |>
+    map_dfr(function(s) {
       df <- loadData(database, s) |>
-        lapply(function(c) {
+        map_dfc(function(c) {
           
           if (all(is.na(c)))
             rep(NA_character_, length(c))
           else
             c
           
-        }) |>
-        bind_cols()
+        })
       
-      transform_mismatched(df, name)
-      
+      # labs <<- var_label(df, unlist = TRUE)
+      transform_mismatched(df, proj.opts$name)
     }) |>
-    bind_rows() |>
     as_tibble()
+
+  one.s <- load_data(database, states[1])
+  var_label(comb) <- var_label(one.s, unlist = TRUE)
+  comb
 }
 
 
