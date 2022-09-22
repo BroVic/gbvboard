@@ -30,16 +30,15 @@ dir <- if (interactive()) {
 }
 
 dir <- normalizePath(dir, winslash = "/")
-opts <- get_project_options(dir)
-var.rgx <- as.list(opts$regex)
-opts$vars <- jGBV::new.varnames
+opts <- fetch_proj_options(dir)
+var.rgx <- opts$var.regex
+opts$vars <- var.mtch <- jGBV::new.varnames
 
 ## Fetch the data
-dbpath <- file.path(dir, "data", paste0(tolower(basename(dir)), ".db"))
-alldata <- combine_project_data(opts, dbpath)
+alldata <- combine_project_data(dir, opts)
 
 ## Clean up bad State entry for NEDC project
-if (opts$name == "NEDC") {
+if (opts$proj.name == "NEDC") {
   alldata <- 
     transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
 }
@@ -53,12 +52,12 @@ alldata <- set_facility_id_col(alldata, dbpath)
 
 # Table operations ----
 ## We start by populating the Project and States tables
-proj <- data.frame(name = opts$name, year = opts$year)
+proj <- data.frame(name = opts$proj.name, year = opts$proj.year)
 try( append_to_db(proj, tbl = "Projects", dbpath) )
 
 local({
   tables <- c("States", "LGAs", "Devices")
-  variables <- opts$vars[c("state", "lga", "device.id")]
+  variables <- var.mtch[c("state", "lga", "device.id")]
   
   invisible(
     walk2(variables,
@@ -71,12 +70,12 @@ local({
 
 # The Interviewers
 local({
-  ivars <- opts$vars[c('interviewer', 'interviewer.contact')]
+  ivars <- var.mtch[c('interviewer', 'interviewer.contact')]
   interviewer <- alldata[, ivars]
   interviewer.name <- interviewer[[ivars[1]]]
   interviewer <- interviewer[!duplicated(interviewer.name), ]
   names(interviewer) <- c("name", "contact")
-  interviewer <- apply_project_id(interviewer, dbpath, opts$name)
+  interviewer <- apply_project_id(interviewer, dbpath, opts$proj.name)
   append_to_db(interviewer, "Interviewer", dbpath)
 })
 
@@ -187,8 +186,7 @@ local({
       "ContactAuthority",
       "SignedCOC",
       "UpdateRefdir",
-      "ChooseTreatment",
-      "ShowDocs"
+      "ChooseTreatment"
     )
   
   factor.indx <- c(
@@ -202,12 +200,11 @@ local({
     "contact.authority",
     "coc.signed",
     "update.refdir",
-    "choose.treatment",
-    "showed.docs"
+    "choose.treatment"
   )
   
-  if (opts$name == "NFWP") {
-    cat.vars <- opts$vars[factor.indx]
+  if (opts$proj.name == "NFWP") {
+    cat.vars <- var.mtch[factor.indx]
     
     walk2(cat.vars,
           tables,
@@ -221,15 +218,10 @@ local({
                               dbpath)
   }
   
-  ## NB: `link_db_tables` can work with a table name OR a session data frame!
-  last.element <- length(tables)
-  tables <- tables[-last.element]
+  ## NB: `link_db_tables` can work with a table name OR a data frame!
   y.tables <- c(tables, "States", "LGAs", "Devices")
-  
-  factor.indx <- factor.indx[-last.element] |>
-    c("state", "lga", "device.id")
-  
-  by.x <- unname(opts$vars[factor.indx])
+  factor.indx <- c(factor.indx, "state", "lga", "device.id")
+  by.x <- unname(var.mtch[factor.indx])
   
   ref.col <-
     c(
@@ -249,7 +241,7 @@ local({
       "device_id"
     )
   
-  if (opts$name == "NFWP") {
+  if (opts$proj.name == "NFWP") {
     
     for (i in seq_along(y.tables)) {
       fac.df <- fac.df |>
@@ -263,12 +255,12 @@ local({
   }
   
   # Add a column for 'Projects"
-  fac.df <- apply_project_id(fac.df, dbpath, opts$name)
+  fac.df <- apply_project_id(fac.df, dbpath, opts$proj.name)
   
   # Merge reference tables with main one via their respective PK IDs
   all.interviewers <- read_from_db(dbpath, "Interviewer")
   proj <- read_from_db(dbpath, "Projects")
-  proj.id <- proj$id[proj$name == opts$name]
+  proj.id <- proj$id[proj$name == opts$proj.name]
   proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
   proj.interviewers[c('proj_id', "contact")] <- NULL 
   
@@ -322,7 +314,7 @@ local({
   
   for (i in seq_along(rgx.index)) {
     col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
   }
 })
 
@@ -389,15 +381,15 @@ local({
     col <- var.rgx[[rgx.index[i]]]
     
     try(
-      create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+      create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
     )
   }
   
-  variables <- opts$vars[c("hf.type", "health.paid")]
+  variables <- var.mtch[c("hf.type", "health.paid")]
   tables <- c("HfType", "CostOpts")
   ref.col <- c("hftype_id", "healthfees_id")
   
-  if (opts$name == "NFWP") {
+  if (opts$proj.name == "NFWP") {
     for (i in seq_along(tables)) {
       create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
       h.data <- h.data |>
@@ -437,20 +429,20 @@ local({
   
   l.data <- make_pivot_tabledf(alldata, var.index, serv.type = "srvtype_legal")
   
-  create_multiresponse_group(var.rgx[['legal.services']],
+  create_multiresponse_group(alldata,
+                             dbpath,
+                             var.rgx[['legal.services']],
                              "LegalServices", 
-                             "LegalservicesFacility",
-                             alldata,
-                             dbpath)
+                             "LegalservicesFacility")
   
   
   
   var.index <- c("legal.paid", "no.resources1")
-  varnames <- unname(opts$vars[var.index])
+  varnames <- unname(var.mtch[var.index])
   tables <- c("CostOpts", "ActionNoresrc")
   ref.col <- c("legalfees_id", "noresource1_id")
   
-  if (opts$name == "NFWP") {
+  if (opts$proj.name == "NFWP") {
     t <- tables[-1]
     v <- varnames[-1]
     
@@ -462,7 +454,7 @@ local({
         link_db_tables(tables[i], varnames[i], "name", ref.col[i], dbpath)
   }
   else {
-    new.value <- if (opts$name == "NEDC")
+    new.value <- if (opts$proj.name == "NEDC")
       c(ActionNoresrc = "The case is closed")
     
     scrubs <- scrublist(context, tables, new.value)
@@ -499,14 +491,14 @@ local({
   
   for (i in 1:2) {
     col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
   }
   
   fees <- "psych_fees"
   tbl.costs <- "CostOpts"
   ref.fees <- "psychfees_id"
   
-  psy.data <- if (opts$name == "NFWP")
+  psy.data <- if (opts$proj.name == "NFWP")
     link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees, dbpath)
   else
     update_linked_tables(psy.data, tbl.costs, fees, ref.fees, dbpath)
@@ -551,7 +543,7 @@ local({
   
   for (i in 1:3) {
     col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
   }
   
   pol.data <- link_db_tables(pol.data,
@@ -596,10 +588,10 @@ local({
   
   for (i in 1:3) {
     col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(col, tables[i], bridges[i], alldata, dbpath)
+    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
   }
   
-  varname <- unname(opts$vars['electricwater'])
+  varname <- unname(var.mtch['electricwater'])
   elec.tbl <- "ElectricWater"
   create_singleresponse_tbl(varname, elec.tbl, shel.data, dbpath)
   
@@ -623,11 +615,11 @@ local({
   
   econ.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_econ')
   
-  create_multiresponse_group(var.rgx[['economic.services']],
+  create_multiresponse_group(alldata,
+                             dbpath,
+                             var.rgx[['economic.services']],
                              "EconServices",
-                             "EconservicesFacility",
-                             alldata,
-                             dbpath)
+                             "EconservicesFacility")
   
   append_to_db(econ.data, "Economic", dbpath)
 })

@@ -223,28 +223,8 @@ append_to_db <- function(df, tbl, db) {
 
 get_labels_via_rgx <- function(df, rgx) {
   stopifnot(is.data.frame(df), is.character(rgx))
-  res <- get_var_labels(df, grep(rgx, names(df)))
-  # res <- res[!grepl("other", res, ignore.case = TRUE)]
-  res
+  get_var_labels(df, grep(rgx, names(df)))
 }
-
-
-
-# prepare_ref_table <- function(variable, options, data = alldata) {
-#   stopifnot(is.character(options), is.data.frame(data))
-#   
-#   if (!variable %in% names(data))
-#     stop(sQuote(variable), " is not a column name of 'data'")
-#   
-#   pwd <- data[[variable]] |>
-#     unique() |>
-#     na.omit() |>
-#     as.character() |>
-#     factor(levels = options,
-#            ordered = TRUE)
-#   
-#   data.frame(id = sort(as.integer(pwd)), response = levels(pwd))
-# }
 
 
 
@@ -277,11 +257,11 @@ link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL, db = NULL) {
 
 
 create_multiresponse_group <-
-  function(rgx,
+  function(data,
+           db,
+           rgx,
            label.tbl,
-           bridge.tbl = NULL,
-           data,
-           db) {
+           bridge.tbl = NULL) {
     lbls <- get_labels_via_rgx(data, rgx)
     
     if (is.null(lbls))
@@ -374,6 +354,7 @@ update_linked_tables <-
             
       data[[indx]] <-
         .createRefCol(x, y, data, db, scrubs = scrublist[[y]], insert = insert, ...)
+      
       names(data)[indx] <- argd$refcol[i]
     }
     data
@@ -596,7 +577,7 @@ transform_mismatched <- function(data, projectname) {
 
 # Activates focus project by applying the project options,
 # returning them for use in this project
-get_project_options <- function(dir, reset = FALSE) {
+fetch_proj_options <- function(dir, reset = FALSE) {
   
   if (!dir.exists(dir))
     stop("No directory ", sQuote(dir), " found")
@@ -608,15 +589,13 @@ get_project_options <- function(dir, reset = FALSE) {
   source(file.path(dir, ".Rprofile"), chdir = TRUE)
   
   jOpts <- lapply(
-    c(
-      "jgbv.project.name",
+    c("jgbv.project.name",
       "jgbv.project.year",
       "jgbv.multiresponse.regex",
-      "jgbv.project.states"
-    ),
+      "jgbv.project.states"), 
     getOption
-  ) |>
-    setNames(c("name", "year", "regex", "states"))
+    ) |>
+    setNames(c("proj.name", "proj.year", "var.regex", "proj.states"))
   
   if (!reset)
     options(curr.opts)
@@ -629,15 +608,20 @@ get_project_options <- function(dir, reset = FALSE) {
 
 
 
-combine_project_data <- function(proj.opts, database) {
+combine_project_data <- function(proj.dir, proj.opts) {
   require(purrr, warn.conflicts = FALSE)
   require(jGBV, quietly = TRUE)
+  
+  if (!dir.exists(proj.dir))
+    stop(sQuote(proj.dir), " does not contain a JHPIEGO GBV project")
+  
+  db.fname <- paste0(tolower(basename(proj.dir)), ".db")
+  database <- file.path(proj.dir, "data", db.fname)
   
   if (!file.exists(database))
     stop("The database ", sQuote(database), " does not exist")
   
-  states <- proj.opts$states
-  # labs <- NULL
+  states <- proj.opts$proj.states
   
   comb <- states |>
     map_dfr(function(s) {
@@ -651,8 +635,7 @@ combine_project_data <- function(proj.opts, database) {
           
         })
       
-      # labs <<- var_label(df, unlist = TRUE)
-      transform_mismatched(df, proj.opts$name)
+      transform_mismatched(df, proj.opts$proj.name)
     }) |>
     as_tibble()
 
@@ -783,13 +766,6 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
     tolower(context)
     
   slist[[context]]
-  
-  # Add up the values used to update the DB table
-  # so that they are used in the comparisons
-  # if (!is.null(insert)) {
-  #   nm <- names(insert)
-  #   obj[[nm]] <- c(obj[[nm]], insert)
-  # }
 }
 
 
