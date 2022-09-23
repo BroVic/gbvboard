@@ -38,6 +38,7 @@ opts$vars <- var.mtch <- jGBV::new.varnames
 alldata <- combine_project_data(dir, opts)
 
 ## Clean up bad State entry for NEDC project
+## TODO: This has to go!
 if (opts$proj.name == "NEDC") {
   alldata <- 
     transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
@@ -51,21 +52,19 @@ dbpath <- here("app/data.db")
 alldata <- set_facility_id_col(alldata, dbpath)
 
 # Table operations ----
-## We start by populating the Project and States tables
-proj <- data.frame(name = opts$proj.name, year = opts$proj.year)
-try( append_to_db(proj, tbl = "Projects", dbpath) )
+local({
+  tblname <- "Projects"
+  proj <- data.frame(name = opts$proj.name, year = opts$proj.year)
+  append_to_db(proj, tbl = tblname, dbpath)
+})
 
 local({
   tables <- c("States", "LGAs", "Devices")
   variables <- var.mtch[c("state", "lga", "device.id")]
   
-  invisible(
-    walk2(variables,
-          tables,
-          create_singleresponse_tbl,
-          data = alldata,
-          db = dbpath)
-  )
+  walk2(variables,
+        tables,
+        ~ update_singleresponse_tbl(alldata, .x, .y, dbpath))
 })
 
 # The Interviewers
@@ -173,7 +172,6 @@ local({
     )
   
   fac.df <- make_pivot_tabledf(alldata, var.index)
-  
   tables <-
     c(
       "AgeGrp",
@@ -188,7 +186,6 @@ local({
       "UpdateRefdir",
       "ChooseTreatment"
     )
-  
   factor.indx <- c(
     "age",
     "org.type", 
@@ -203,25 +200,22 @@ local({
     "choose.treatment"
   )
   
+  tblinfo <- table_info_matrix(opts, factor.indx, tables)
+  
   if (opts$proj.name == "NFWP") {
-    cat.vars <- var.mtch[factor.indx]
+    update_many_singleresponse_tbls(alldata, tblinfo, dbpath)
     
-    walk2(cat.vars,
-          tables,
-          create_singleresponse_tbl,
-          data = alldata,
-          db = dbpath)
-    
-    create_singleresponse_tbl(c("Always", "Sometimes", "Never"),
-                              "ReferralToOptions",
-                              alldata,
-                              dbpath)
+    # Here we used actual values rather than a selected variable
+    # from the data to obtain the responses.
+    responses <- c("Always", "Sometimes", "Never")
+    update_singleresponse_tbl(alldata, responses, "ReferralToOptions", dbpath)
   }
   
-  ## NB: `link_db_tables` can work with a table name OR a data frame!
-  y.tables <- c(tables, "States", "LGAs", "Devices")
-  factor.indx <- c(factor.indx, "state", "lga", "device.id")
-  by.x <- unname(var.mtch[factor.indx])
+  # Here, the data used for creating reference tables was extended
+  add.tbls <- c("States", "LGAs", "Devices")
+  add.indx <- c("state", "lga", "device.id")
+  added.info <- table_info_matrix(opts, add.indx, add.tbls)
+  tblinfo <- rbind(tblinfo, added.info)
   
   ref.col <-
     c(
@@ -241,18 +235,8 @@ local({
       "device_id"
     )
   
-  if (opts$proj.name == "NFWP") {
-    
-    for (i in seq_along(y.tables)) {
-      fac.df <- fac.df |>
-        link_db_tables(y.tables[i], by.x[i], "name", ref.col[i], dbpath)
-    }
-    
-  }
-  else {
-    fac.df <- fac.df |>
-      update_linked_tables(y.tables, by.x, ref.col, dbpath, scrublist())
-  }
+  tblinfo <- cbind(tblinfo, refcolumn = ref.col)
+  fac.df <- unite_main_with_ref_data(fac.df, tblinfo, opts, dbpath, scrublist())
   
   # Add a column for 'Projects"
   fac.df <- apply_project_id(fac.df, dbpath, opts$proj.name)
@@ -268,8 +252,7 @@ local({
     link_db_tables(
       fac.df, 
       proj.interviewers, 
-      "interviewer_name", 
-      "name", 
+      "interviewer_name",
       "interviewer_id"
     )
   
@@ -277,7 +260,7 @@ local({
   for(i in grep("^refto_", names(alldata), value = TRUE)) {
     refname <- paste0(i, "_id")
     fac.df <-
-      link_db_tables(fac.df, "ReferralToOptions", i, "name", refname, dbpath)
+      link_db_tables(fac.df, "ReferralToOptions", i, refname, dbpath)
   }
   
   append_to_db(fac.df, "Facility", dbpath)
@@ -312,16 +295,18 @@ local({
       "ServicetypeFacility"
     )
   
-  for (i in seq_along(rgx.index)) {
-    col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
-  }
+  tblinfo <-
+    table_info_matrix(opts,
+                      index = rgx.index,
+                      tablename = tables,
+                      bridge = bridges)
+  
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
 })
 
 
 # Health services
 local({
-  
   var.index <-  
     c(
       fkey = "hf.type",                   
@@ -354,6 +339,7 @@ local({
   
   h.data <- make_pivot_tabledf(alldata, var.index, "srvtype_health")
   
+  ## Bridge tables
   rgx.index <-
     c("health.services",
       "equip.missing",
@@ -377,38 +363,30 @@ local({
       "TrainedHealthFacility"
     )
   
-  for (i in seq_along(tables)) {
-    col <- var.rgx[[rgx.index[i]]]
-    
-    try(
-      create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
-    )
-  }
+  tblinfo <-
+    table_info_matrix(opts,
+                      index = rgx.index,
+                      tablename = tables,
+                      bridge = bridges)
   
-  variables <- var.mtch[c("hf.type", "health.paid")]
-  tables <- c("HfType", "CostOpts")
-  ref.col <- c("hftype_id", "healthfees_id")
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
   
-  if (opts$proj.name == "NFWP") {
-    for (i in seq_along(tables)) {
-      create_singleresponse_tbl(variables[i], tables[i], h.data, dbpath)
-      h.data <- h.data |>
-        link_db_tables(tables[i], variables[i], "name", ref.col[i], dbpath)
-    }
-  }
-  else {
-    h.data <- h.data |>
-      update_linked_tables(tables, variables, ref.col, dbpath)
-  }
+  # Link tables with external references
+  tblinfo <- 
+    table_info_matrix(opts,
+                      index = c("hf.type", "health.paid"),
+                      tablename = c("HfType", "CostOpts"),
+                      refcolumn = c("hftype_id", "healthfees_id"))
   
+  unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
+  
+  # Put it all together
   append_to_db(h.data, "Health", dbpath)
 })
 
 
 # Legal Aid Services
 local({
-  context <- "Legal"
-  
   var.index <-
     c(
       field = "oth.srvleg.dscrb",
@@ -429,39 +407,29 @@ local({
   
   l.data <- make_pivot_tabledf(alldata, var.index, serv.type = "srvtype_legal")
   
-  create_multiresponse_group(alldata,
-                             dbpath,
-                             var.rgx[['legal.services']],
-                             "LegalServices", 
-                             "LegalservicesFacility")
+  # Bridge table for legal aid data
+  tblinfo <- 
+    table_info_matrix(opts,
+                      index = 'legal.services',
+                      tablename = "LegalServices",
+                      bridge = "LegalservicesFacility")
   
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
   
+  # Linkage with reference table for legal aid 
+  tblinfo2 <- 
+    table_info_matrix(opts,
+                      index = c("legal.paid", "no.resources1"),
+                      tablename = c("CostOpts", "ActionNoresrc"),
+                      refcolumn = c("legalfees_id", "noresource1_id"))
+ 
+  update_many_singleresponse_tbls(l.data, tblinfo2, dbpath)
   
-  var.index <- c("legal.paid", "no.resources1")
-  varnames <- unname(var.mtch[var.index])
-  tables <- c("CostOpts", "ActionNoresrc")
-  ref.col <- c("legalfees_id", "noresource1_id")
+  context <- "Legal"
+  scrubs <- scrublist(context, tables, new.value)
+  l.data <- unite_main_with_ref_data(l.data, tblinfo2, opts, db, scrubs)
   
-  if (opts$proj.name == "NFWP") {
-    t <- tables[-1]
-    v <- varnames[-1]
-    
-    for (i in seq_along(t))
-      create_singleresponse_tbl(v[i], t[i], l.data, dbpath)
-    
-    for (i in seq_along(tables))
-      l.data <- l.data |>
-        link_db_tables(tables[i], varnames[i], "name", ref.col[i], dbpath)
-  }
-  else {
-    new.value <- if (opts$proj.name == "NEDC")
-      c(ActionNoresrc = "The case is closed")
-    
-    scrubs <- scrublist(context, tables, new.value)
-    
-    l.data <- l.data |>
-      update_linked_tables(tables, varnames, ref.col, dbpath, scrubs, new.value)
-  }
+  # Update the database
   append_to_db(l.data, context, dbpath)
 })
 
@@ -485,24 +453,28 @@ local({
     )
   
   psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_psych')
-  rgx.index <- c("psychosoc.services", "trained.psychosoc")
-  tables <- c("PsychoServices", "PsychoTrain")
-  bridges <- c("PsychoservicesFacility", "PsychotrainFacility")
   
-  for (i in 1:2) {
-    col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
-  }
+  # Bridge tables
+  tblinfo <-
+    table_info_matrix(
+      opts,
+      index = c("psychosoc.services", "trained.psychosoc"),
+      tablename = c("PsychoServices", "PsychoTrain"),
+      bridge = c("PsychoservicesFacility", "PsychotrainFacility")
+    )
   
-  fees <- "psych_fees"
-  tbl.costs <- "CostOpts"
-  ref.fees <- "psychfees_id"
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
   
-  psy.data <- if (opts$proj.name == "NFWP")
-    link_db_tables(psy.data, tbl.costs, fees, "name", ref.fees, dbpath)
-  else
-    update_linked_tables(psy.data, tbl.costs, fees, ref.fees, dbpath)
+  # Linking reference tables
+  tblinfo <-
+    table_info_matrix(opts,
+                      index = "psych.paid",
+                      tablename = "CostOpts",
+                      refcolumn = "psychfees_id")
   
+  psy.data <- unite_main_with_ref_data(psy.data, tblinfo, opts, dbpath)
+  
+  # Finalize for psychosocial services
   append_to_db(psy.data, "Psychosocial", dbpath)
 })
 
@@ -532,29 +504,30 @@ local({
       field = "police.confidential"
     )
   
-  psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_police')
-  rgx.index <- c("police.services", "trained.police", "resources.police")
-  tables <- c("PoliceServices", "TrainedPolice", "PoliceResources")
+  pol.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_police')
   
-  bridges <-
-    c("PoliceservicesFacility",
-      "TrainedpoliceFacility",
-      "PoliceresourcesFacility")
+  # Make bridge tables
+  tblinfo <- 
+    table_info_matrix(
+      index = c("police.services", "trained.police", "resources.police"),
+      tablename = c("PoliceServices", "TrainedPolice", "PoliceResources"),
+      bridge = c("PoliceservicesFacility",
+                 "TrainedpoliceFacility",
+                 "PoliceresourcesFacility")
+    )
   
-  for (i in 1:3) {
-    col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
-  }
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
   
-  pol.data <- link_db_tables(pol.data,
-                             "CostOpts",
-                             "police_fees",
-                             "name",
-                             "policefees_id",
-                             dbpath)
+  # Link reference table and save the data
+  pol.data <-
+    link_db_tables(pol.data,
+                   "CostOpts",
+                   "police_fees",
+                   "name",
+                   "policefees_id",
+                   dbpath)
   
   append_to_db(pol.data, "Police", dbpath)
-  
 })
 
 
@@ -578,26 +551,28 @@ local({
     )
  
   shel.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_shelt')
-  rgx.index <- c("shelter.services", "privacy.shelter", "amenities.shelter")
-  tables <- c("ShelterServices", "ShelterPrivacy", "ShelterAmenities")
   
-  bridges <-
-    c("ShelterservicesFacility",
-      "ShelterprivacyFacility",
-      "ShelteramenitiesFacility")
+  # Bridge tables
+  tblinfo <- 
+    table_info_matrix(
+      index = c("shelter.services", "privacy.shelter", "amenities.shelter"),
+      tablename = c("ShelterServices", "ShelterPrivacy", "ShelterAmenities"),
+      bridge = c("ShelterservicesFacility",
+                 "ShelterprivacyFacility",
+                 "ShelteramenitiesFacility")
+    )
   
-  for (i in 1:3) {
-    col <- var.rgx[[rgx.index[i]]]
-    create_multiresponse_group(alldata, dbpath, col, tables[i], bridges[i])
-  }
+  update_bridge_tables(alldata, tblinfo, opts, dbpath)
   
+  # Link reference tables
   varname <- unname(var.mtch['electricwater'])
   elec.tbl <- "ElectricWater"
-  create_singleresponse_tbl(varname, elec.tbl, shel.data, dbpath)
+  update_singleresponse_tbl(shel.data, varname, elec.tbl, dbpath)
   
   shel.data <-
-    link_db_tables(shel.data, elec.tbl, varname, "name", "elecwater_id", dbpath)
+    link_db_tables(shel.data, elec.tbl, varname, "elecwater_id", dbpath)
   
+  # Add to the database
   append_to_db(shel.data, "Shelter", dbpath)
 })
 
@@ -627,12 +602,17 @@ local({
 # Remove the original tables
 local({
   ans <- 1L
+  
   if (interactive())
     ans <- menu(c("Yes", "No"), title = "Remove the original tables?")
+  
   if (ans == 2L)
     return()
+  
   for (state in states) {
+    
     for (category in c("services", "capacity")) {
+      
       for (table in c("cleaned", "labelled")) {
         tblname <- sprintf("%s_%s_%s", tolower(state), category, table)
         drop_db_table(tblname)

@@ -102,7 +102,6 @@ set_facility_id_col <- function(data, db) {
     nrw <- 0L
   
   data %>% mutate(facility_id = nrw + seq(nrow(.)))
-  
 }
 
 
@@ -227,8 +226,49 @@ get_labels_via_rgx <- function(df, rgx) {
 }
 
 
+# Creates a matrix that contains, in columnwise fashion, the elements
+# for linking together tables with categories with the main table. The
+# columns are:
+# - name of the table
+# - indices for retrieving the variable that populates the table
+# - optionally addition column(s) and most commonly the name of new ID columns
+table_info_matrix <- function(proj.opts, index, tablename, ...) {
+  factor <- proj.opts$vars[index]
+  mt <- cbind(factor, tablename, ...)
+  rownames(mt) <- NULL
+  mt
+}
 
-link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL, db = NULL) {
+
+
+
+# Takes updates the main table by creating the linkages with reference tables.
+# The internal implementation for NFWP differs from all the other projects.
+unite_main_with_ref_data <- function(data, tableinfo, proj.opts, db, ...) {
+  stopifnot({
+    is.data.frame(data)
+    is.matrix(tableinfo)
+    file.exists(db)
+  })
+  
+  y.tables <- tableinfo[, 'tablename']
+  by.x <- tableinfo[, 'factor']
+  ref.col <- tableinfo[, 'refcolumn']
+  
+  if (proj.opts$proj.name == "NFWP") {
+    
+    for (i in seq_along(y.tables))
+      data <- link_db_tables(data, y.tables[i], by.x[i], ref.col[i], db)
+    
+    return(data)
+  }
+  
+  update_linked_tables(data, y.tables, by.x, ref.col, db, ...)
+}
+
+
+
+link_db_tables <- function(x, y, by.x, ref.col = NULL, db = NULL) {
   
   if (is.character(y)) {
     
@@ -242,17 +282,36 @@ link_db_tables <- function(x, y, by.x, by.y = NULL, ref.col = NULL, db = NULL) {
     y <- read_from_db(db, y)
   }
   
-  if (is.null(by.y)) 
-    by.y <- by.x
-  
   if (is.null(ref.col)) 
     ref.col <- by.x
   
-  ndf <- merge(x, y, by.x = by.x, by.y = by.y, all = TRUE)
+  ndf <- merge(x, y, by.x = by.x, by.y = 'name', all = TRUE)
   ndf[[by.x]] <- NULL
   names(ndf)[match("id", names(ndf))] <- ref.col
   ndf
 }
+
+
+
+
+
+# Collectively works on updating bridge tables, which exist for
+# the benefit of the multiple response data
+update_bridge_tables <- function(data, tableinfo, projopts, db) {
+  stopifnot({
+    is.data.frame(data)
+    is.matrix(tableinfo)
+    file.exists(db)
+  })
+  
+  cols <- tableinfo[, 'factor']
+  tables <- tableinfo[, 'tablename']
+  bridges <- tableinfo[, 'bridge']
+  
+  for (i in seq(nrow(tableinfo)))
+    create_multiresponse_group(data, db, cols[i], tables[i], bridges[i])
+}
+
 
 
 
@@ -289,7 +348,25 @@ create_multiresponse_group <-
 
 
 
-create_singleresponse_tbl <- function(col, tblname, data, db) {
+
+update_many_singleresponse_tbls <- function(data, tableinfo, db) {
+  stopifnot({
+    is.data.frame(data)
+    is.matrix(tableinfo)
+    file.exists(db)
+  })
+  
+  v <- tableinfo[, 'factor']
+  t <- tableinfo[, 'tablename']
+  
+  for (i in seq(nrow(tableinfo)))
+    update_singleresponse_tbl(data, v[i], t[i], db)
+}
+
+
+
+
+update_singleresponse_tbl <- function(data, col, tblname, db) {
   stopifnot({
     is.character(col)
     is.character(tblname)
@@ -306,7 +383,6 @@ create_singleresponse_tbl <- function(col, tblname, data, db) {
     as.character()
   
   df <- data.frame(name = vals)
-  
   append_to_db(df, tblname, db)
 }
 
