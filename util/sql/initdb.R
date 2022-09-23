@@ -37,13 +37,6 @@ opts$vars <- var.mtch <- jGBV::new.varnames
 ## Fetch the data
 alldata <- combine_project_data(dir, opts)
 
-## Clean up bad State entry for NEDC project
-## TODO: This has to go!
-if (opts$proj.name == "NEDC") {
-  alldata <- 
-    transform(alldata, stateorigin = sub("NG002", "Adamawa", stateorigin))
-}
-
 # Change focus to app database.
 # We will use the existing database tables 
 # to set a main ID column which represents the
