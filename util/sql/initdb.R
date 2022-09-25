@@ -8,13 +8,7 @@
 # data from the project. We are using cleaned/transformed data 
 
 # Dependencies ----
-library(tidyr)
-library(purrr)
-library(labelled)
-library(jGBV, quietly = TRUE)
-library(dplyr, warn.conflicts = FALSE)
 suppressPackageStartupMessages(library(here))
-
 source(here("util/sql/dbfuns.R"))
 
 # Project Data ----
@@ -30,9 +24,12 @@ dir <- if (interactive()) {
 }
 
 dir <- normalizePath(dir, winslash = "/")
+
+## Each project has certain `options` set to values that
+## determine how its dataset is handled, and here they
+## are collected as a list.
 opts <- fetch_proj_options(dir)
-var.rgx <- opts$var.regex
-opts$vars <- var.mtch <- jGBV::new.varnames
+opts$vars <- jGBV::new.varnames
 
 ## Fetch the data
 alldata <- combine_project_data(dir, opts)
@@ -53,16 +50,16 @@ local({
 
 local({
   tables <- c("States", "LGAs", "Devices")
-  variables <- var.mtch[c("state", "lga", "device.id")]
+  variables <- opts$vars[c("state", "lga", "device.id")]
   
-  walk2(variables,
-        tables,
-        ~ update_singleresponse_tbl(alldata, .x, .y, dbpath))
+  purrr::walk2(variables,
+               tables,
+               ~ update_singleresponse_tbl(alldata, .x, .y, dbpath))
 })
 
 # The Interviewers
 local({
-  ivars <- var.mtch[c('interviewer', 'interviewer.contact')]
+  ivars <- opts$vars[c('interviewer', 'interviewer.contact')]
   interviewer <- alldata[, ivars]
   interviewer.name <- interviewer[[ivars[1]]]
   interviewer <- interviewer[!duplicated(interviewer.name), ]
@@ -73,98 +70,105 @@ local({
 
 # Facility-specific data ----
 local({
-  var.index <- 
-    c(
-      field = "start",
-      field = "end",
-      field = "today",
-      field = "has.office",
-      field = "has.phone",
-      field = "continue",
-      field = "consent",
-      field = "orgname",
-      field = "opstart",
-      field = "gbvstart",
-      fkey = "state",
-      fkey = "lga",
-      field = "ward",
-      field = "address",
-      field = "phone",
-      field = "email",
-      fkey = "interviewer",
-      fkey = "device.id",
-      field = "staffname",
-      field = "title",
-      field = "info",
-      field = "gps.long",
-      field = "gps.lat",
-      field = "gps.alt",
-      field = "gps.prec",
-      fkey = "age",
-      fkey = "org.type",
-      field = "govt.spec",
-      field = "oth.org.type",
-      field = "open.247",
-      field = "open.time",
-      field = "close.time",
-      field = "oth.gbv.dscrb",
-      field = "oth.fund.dscrb",
-      field = "fulltime.staff",
-      field = "partime.staff",
-      field = "female.staff",
-      bool = "uses.docs",
-      fkey = "showed.docs",
-      field = "doc.photo",
-      field = "oth.docs.dscrb",
-      field = "process.nodoc",
-      bool = "child.docs",
-      bool = "standard.forms",
-      fkey = "how.data",
-      bool = "data.is.stored",
-      fkey = "computer.secured",
-      fkey = "contact.authority",
-      field = "why.contact",     
-      field = "contact.case",
-      field = "contact.authtype",
-      bool = "priv",
-      bool = "priv.room",
-      fkey = "private.ques",
-      field = "details.miss.equip",
-      bool = "serve.disabled",
-      bool = "disabled.special",
-      field = "oth.disabl.dscrb",
-      fkey = "coc.signed",
-      bool = "coc.copies",          
-      bool = "coc.confidentiality", 
-      bool = "coc.equity",          
-      bool = "has.focalperson",     
-      field = "focalperson.contact",
-      bool = "has.gbv.trained",     
-      field = "num.gbv.trained",
-      field = "who.gbv.trained",
-      field = "which.gbv.trained",
-      bool = "has.refdir",          
-      field = "refdir.pic",
-      fkey = "refto.health",        
-      fkey = "refto.psych",         
-      fkey = "refto.police",        
-      fkey = "refto.legal",         
-      fkey = "refto.shelt",         
-      fkey = "refto.econ",          
-      fkey = "refto.other",         
-      field = "oth.refto.dscrb",
-      fkey = "update.refdir",       
-      field = "gbvcase.contact",
-      bool = "choose.referral",     
-      field = "why.nochoose.ref",
-      fkey = "choose.treatment",    
-      bool = "coordination",        
-      field = "which.coord",
-      field = "comment.coord",
-      field = "service.othersdetail"
-    )
+  fkey <- c(
+    "state",
+    "lga",
+    "interviewer",
+    "device.id",
+    "age",
+    "showed.docs",
+    "org.type",
+    "how.data",
+    "private.ques",
+    "computer.secured",
+    "contact.authority",
+    "coc.signed",
+    "refto.health",
+    "refto.psych",
+    "refto.police",
+    "refto.legal",
+    "refto.shelt",
+    "refto.econ",
+    "refto.other",
+    "update.refdir",
+    "choose.treatment"
+  )
   
+  bool <- c(
+    "uses.docs",
+    "child.docs",
+    "standard.forms",
+    "data.is.stored",
+    "priv",
+    "priv.room",
+    "serve.disabled",
+    "disabled.special",
+    "coc.copies",
+    "coc.confidentiality",
+    "coc.equity",
+    "has.focalperson",
+    "has.gbv.trained",
+    "has.refdir",
+    "choose.referral",
+    "coordination"
+  )
+  
+  field <- c(
+    "start",
+    "end",
+    "today",
+    "has.office",
+    "has.phone",
+    "continue",
+    "consent",
+    "orgname",
+    "opstart",
+    "gbvstart",
+    "ward",
+    "address",
+    "phone",
+    "email",
+    "title",
+    "info",
+    "gps.long",
+    "gps.lat",
+    "gps.alt",
+    "gps.prec",
+    "oth.org.type",
+    "open.247",
+    "open.time",
+    "close.time",
+    "oth.gbv.dscrb",
+    "staffname",
+    "oth.fund.dscrb",
+    "govt.spec",
+    "fulltime.staff",
+    "partime.staff",
+    "female.staff",
+    "doc.photo",
+    "oth.docs.dscrb",
+    "process.nodoc",
+    "why.contact",
+    "contact.case",
+    "contact.authtype",
+    "details.miss.equip",
+    "oth.disabl.dscrb",
+    "focalperson.contact",
+    "num.gbv.trained",
+    "who.gbv.trained",
+    "which.gbv.trained",
+    "refdir.pic",
+    "oth.refto.dscrb",
+    "gbvcase.contact",
+    "why.nochoose.ref",
+    "which.coord",
+    "comment.coord",
+    "service.othersdetail"
+  )
+  
+  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
   fac.df <- make_pivot_tabledf(alldata, var.index)
+  
   tables <-
     c(
       "AgeGrp",
@@ -179,6 +183,7 @@ local({
       "UpdateRefdir",
       "ChooseTreatment"
     )
+  
   factor.indx <- c(
     "age",
     "org.type", 
@@ -193,7 +198,10 @@ local({
     "choose.treatment"
   )
   
-  tblinfo <- table_info_matrix(opts, factor.indx, tables)
+  tblinfo <-
+    table_info_matrix(index = factor.indx,
+                      tablename = tables,
+                      proj.opts = opts)
   
   if (opts$proj.name == "NFWP") {
     update_many_singleresponse_tbls(alldata, tblinfo, dbpath)
@@ -207,7 +215,10 @@ local({
   # Here, the data used for creating reference tables was extended
   add.tbls <- c("States", "LGAs", "Devices")
   add.indx <- c("state", "lga", "device.id")
-  added.info <- table_info_matrix(opts, add.indx, add.tbls)
+  added.info <-
+    table_info_matrix(index = add.indx,
+                      tablename = add.tbls,
+                      proj.opts = opts)
   tblinfo <- rbind(tblinfo, added.info)
   
   ref.col <-
@@ -234,33 +245,8 @@ local({
   # Add a column for 'Projects"
   fac.df <- apply_project_id(fac.df, dbpath, opts$proj.name)
   
-  # Merge reference tables with main one via their respective PK IDs
-  all.interviewers <- read_from_db(dbpath, "Interviewer")
-  proj <- read_from_db(dbpath, "Projects")
-  proj.id <- proj$id[proj$name == opts$proj.name]
-  proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
-  proj.interviewers[c('proj_id', "contact")] <- NULL 
+  # Populate the bridge tables for multiple response data
   
-  fac.df <-
-    link_db_tables(
-      fac.df, 
-      proj.interviewers, 
-      "interviewer_name",
-      "interviewer_id"
-    )
-  
-  # For those variables for "referrals to" i.e. always/sometimes/never
-  for(i in grep("^refto_", names(alldata), value = TRUE)) {
-    refname <- paste0(i, "_id")
-    fac.df <-
-      link_db_tables(fac.df, "ReferralToOptions", i, refname, dbpath)
-  }
-  
-  append_to_db(fac.df, "Facility", dbpath)
-})
-
-
-local({
   rgx.index <-
     c(
       "gbv.types",
@@ -289,47 +275,74 @@ local({
     )
   
   tblinfo <-
-    table_info_matrix(opts,
-                      index = rgx.index,
+    table_info_matrix(index = rgx.index,
                       tablename = tables,
-                      bridge = bridges)
+                      bridge = bridges,
+                      proj.opts = opts,
+                      type = 'regex')
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
+  
+  # Merge reference tables with main one via their respective PK IDs
+  tbls <-
+    lapply(c("Interviewer", "Projects"), function(x)
+      jGBV::read_from_db(dbpath, x))
+  all.interviewers <- tbls[[1]]
+  proj <- tbls[[2]]
+  rm(tbls)
+  proj.id <- proj$id[proj$name == opts$proj.name]
+  proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
+  proj.interviewers[c('proj_id', "contact")] <- NULL 
+  
+  fac.df <-
+    link_db_tables(
+      fac.df, 
+      proj.interviewers, 
+      "interviewer_name",
+      "interviewer_id"
+    )
+  
+  # For those variables for "referrals to" i.e. always/sometimes/never
+  for(i in grep("^refto_", names(alldata), value = TRUE)) {
+    refname <- paste0(i, "_id")
+    fac.df <-
+      link_db_tables(fac.df, "ReferralToOptions", i, refname, dbpath)
+  }
+  
+  append_to_db(fac.df, "Facility", dbpath)
 })
 
 
 # Health services
 local({
-  var.index <-  
-    c(
-      fkey = "hf.type",                   
-      field = "hf.type.others",
-      field = "oth.srvhealth.dscrb",
-      field = "total.health",
-      bool = "has.pep",                   
-      field = "has.no.pep",
-      bool = "has.contracep",             
-      field = "has.no.contracep",
-      fkey = "health.paid",               
-      bool = "access.srv",                
-      field = "healthfee.clin",
-      field = "healthfee.inj",
-      field = "healthfee.pep",
-      field = "healthfee.contra",
-      field = "healthfee.hiv",
-      field = "healthfee.sti",
-      field = "healthfee.foren",
-      field = "healthfee.psych",
-      field = "healthfee.case",
-      field = "healthfee.basic",
-      field = "healthfee.other",
-      bool = "forms.yes",                 
-      field = "comment.elem",
-      field = "comment.suppl",
-      field = "oth.hlthtrain.dscrb",
-      field = "qual.staff"
-    )
   
+  fkey <- c("hf.type", "health.paid")
+  bool <- c("has.pep", "has.contracep", "access.srv", "forms.yes")
+  
+  field <- c(
+    "hf.type.others",
+    "oth.srvhealth.dscrb",
+    "total.health",
+    "has.no.pep",
+    "has.no.contracep",
+    "healthfee.clin",
+    "healthfee.inj",
+    "healthfee.pep",
+    "healthfee.contra",
+    "healthfee.hiv",
+    "healthfee.sti",
+    "healthfee.foren",
+    "healthfee.psych",
+    "healthfee.case",
+    "healthfee.basic",
+    "healthfee.other",
+    "comment.elem",
+    "comment.suppl",
+    "oth.hlthtrain.dscrb",
+    "qual.staff"
+  )
+  
+  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
   h.data <- make_pivot_tabledf(alldata, var.index, "srvtype_health")
   
   ## Bridge tables
@@ -357,19 +370,20 @@ local({
     )
   
   tblinfo <-
-    table_info_matrix(opts,
-                      index = rgx.index,
+    table_info_matrix(index = rgx.index,
                       tablename = tables,
-                      bridge = bridges)
+                      bridge = bridges,
+                      proj.opts = opts,
+                      type = 'regex')
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Link tables with external references
   tblinfo <- 
-    table_info_matrix(opts,
-                      index = c("hf.type", "health.paid"),
+    table_info_matrix(index = c("hf.type", "health.paid"),
                       tablename = c("HfType", "CostOpts"),
-                      refcolumn = c("hftype_id", "healthfees_id"))
+                      refcolumn = c("hftype_id", "healthfees_id"),
+                      proj.opts = opts)
   
   unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
   
@@ -380,41 +394,41 @@ local({
 
 # Legal Aid Services
 local({
-  var.index <-
-    c(
-      field = "oth.srvleg.dscrb",
-      field = "total.legal",
-      fkey = "legal.paid",                
-      field = "legal.access", 
-      field = "legalfee.consult",
-      field = "legalfee.rep",
-      field = "legalfee.court",
-      field = "legalfee.med",
-      field = "legalfee.secur",
-      field = "legalfee.counsel",
-      field = "legalfee.other",
-      bool = "support.for.court",         
-      fkey = "no.resources1",             
-      field = "no.resources2"
-    )
+  bool <- "support.for.court" 
+  fkey <- c("legal.paid", "no.resources1")
+  field <- c(
+    "oth.srvleg.dscrb",
+    "total.legal",
+    "legal.access",
+    "legalfee.consult",
+    "legalfee.rep",
+    "legalfee.court",
+    "legalfee.med",
+    "legalfee.secur",
+    "legalfee.counsel",
+    "legalfee.other",
+    "no.resources2"
+  )
   
+  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
   l.data <- make_pivot_tabledf(alldata, var.index, serv.type = "srvtype_legal")
   
   # Bridge table for legal aid data
   tblinfo <- 
-    table_info_matrix(opts,
-                      index = 'legal.services',
+    table_info_matrix(index = 'legal.services',
                       tablename = "LegalServices",
-                      bridge = "LegalservicesFacility")
+                      bridge = "LegalservicesFacility",
+                      proj.opts = opts,
+                      type = 'regex')
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Linkage with reference table for legal aid 
   tblinfo2 <- 
-    table_info_matrix(opts,
-                      index = c("legal.paid", "no.resources1"),
+    table_info_matrix(index = c("legal.paid", "no.resources1"),
                       tablename = c("CostOpts", "ActionNoresrc"),
-                      refcolumn = c("legalfees_id", "noresource1_id"))
+                      refcolumn = c("legalfees_id", "noresource1_id"),
+                      proj.opts = opts)
  
   update_many_singleresponse_tbls(l.data, tblinfo2, dbpath)
   
@@ -430,40 +444,41 @@ local({
 
 # Psychosocial support
 local({
-  var.index <- 
-    c(
-      field = "oth.srvpsy.dscrb",
-      field = "total.psychosocial",
-      fkey = "psych.paid",              
-      field = "psych.access",
-      field = "psychfee.counsel",
-      field = "psychfee.case",
-      field = "psychfee.therapy",
-      field = "psychfee.safety",
-      field = "psychfee.other",
-      field = "oth.psychtrain.dscrb",
-      field = "qualstaff.id"
-    )
+  fkey <- "psych.paid"
+  field <- c(
+    "oth.srvpsy.dscrb",
+    "total.psychosocial",
+    "psych.access",
+    "psychfee.counsel",
+    "psychfee.case",
+    "psychfee.therapy",
+    "psychfee.safety",
+    "psychfee.other",
+    "oth.psychtrain.dscrb",
+    "qualstaff.id"
+  )
   
+  var.index <- set_variable_indices(fkey = fkey, field = field)
   psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_psych')
   
   # Bridge tables
   tblinfo <-
     table_info_matrix(
-      opts,
       index = c("psychosoc.services", "trained.psychosoc"),
       tablename = c("PsychoServices", "PsychoTrain"),
-      bridge = c("PsychoservicesFacility", "PsychotrainFacility")
+      bridge = c("PsychoservicesFacility", "PsychotrainFacility"),
+      proj.opts = opts,
+      type = 'regex'
     )
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Linking reference tables
   tblinfo <-
-    table_info_matrix(opts,
-                      index = "psych.paid",
+    table_info_matrix(index = "psych.paid",
                       tablename = "CostOpts",
-                      refcolumn = "psychfees_id")
+                      refcolumn = "psychfees_id",
+                      proj.opts = opts)
   
   psy.data <- unite_main_with_ref_data(psy.data, tblinfo, opts, dbpath)
   
@@ -474,29 +489,29 @@ local({
 
 # Security/Police
 local({
-  var.index <-
-    c(
-      field = "oth.srvpol.dscrb",
-      bool = "gbv.police",                 
-      field = "who.gbvpolice",
-      bool = "refer.otherpolice",          
-      field = "trainedpolice.id",
-      field = "total.police.rape",
-      field = "total.police.ipv",
-      field = "total.police.csa",
-      field = "total.police.fgm",
-      field = "total.police.oth",
-      field = "oth.polnum.dscrb",
-      fkey = "police.fees",                
-      field = "police.access",
-      field = "policefee.case",
-      field = "policefee.safety",
-      field = "policefee.other",
-      field = "oth.policeresrc.dscrb",
-      bool = "police.followup",            
-      field = "police.confidential"
-    )
+  fkey <-  "police.fees"
+  bool <- c("gbv.police",
+            "refer.otherpolice",
+            "police.followup")
+  field <- c(
+    "who.gbvpolice",
+    "oth.srvpol.dscrb",
+    "trainedpolice.id",
+    "total.police.rape",
+    "total.police.ipv",
+    "total.police.csa",
+    "total.police.fgm",
+    "total.police.oth",
+    "oth.polnum.dscrb",
+    "police.access",
+    "policefee.case",
+    "policefee.safety",
+    "policefee.other",
+    "oth.policeresrc.dscrb",
+    "police.confidential"
+  )
   
+  var.index <- set_variable_indices(fkey, bool, field)
   pol.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_police')
   
   # Make bridge tables
@@ -506,19 +521,22 @@ local({
       tablename = c("PoliceServices", "TrainedPolice", "PoliceResources"),
       bridge = c("PoliceservicesFacility",
                  "TrainedpoliceFacility",
-                 "PoliceresourcesFacility")
+                 "PoliceresourcesFacility"),
+      proj.opts = opts,
+      type = 'regex'
     )
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Link reference table and save the data
-  pol.data <-
-    link_db_tables(pol.data,
-                   "CostOpts",
-                   "police_fees",
-                   "name",
-                   "policefees_id",
-                   dbpath)
+  tblinfo <-
+    table_info_matrix(
+      index = "police.fees",
+      tablename = "CostOpts",
+      refcolumn = "policefees_id",
+      proj.opts = opts
+    )
+  pol.data <- unite_main_with_ref_data(pol.data, tblinfo, opts, dbpath)
   
   append_to_db(pol.data, "Police", dbpath)
 })
@@ -528,21 +546,22 @@ local({
 
 # Temporary shelter
 local({
-  var.index <- 
-    c(
-      field = "health.srvshelt.dscrb",
-      field = "oth.srvshelt.dscrb",
-      bool = "shelter.famfriendly",        
-      bool = "shelter.kidfriendly",        
-      field = "oth.sheltpriv.dscrb",
-      field = "oth.sheltamen.dscrb",
-      fkey = "electricwater",              
-      field = "total.shelter.f",
-      field = "total.shelter.m",
-      bool = "shelter.support",            
-      bool = "shelter.new.support"         
-    )
- 
+  fkey <-  "electricwater"
+  field <- c(
+    "health.srvshelt.dscrb",
+    "oth.srvshelt.dscrb",
+    "oth.sheltpriv.dscrb",
+    "oth.sheltamen.dscrb",
+    "total.shelter.f",
+    "total.shelter.m"
+  )
+  bool <- c(
+    "shelter.famfriendly",
+    "shelter.kidfriendly",
+    "shelter.support",
+    "shelter.new.support"
+  )
+  var.index <- set_variable_indices(fkey, bool, field)
   shel.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_shelt')
   
   # Bridge tables
@@ -552,18 +571,22 @@ local({
       tablename = c("ShelterServices", "ShelterPrivacy", "ShelterAmenities"),
       bridge = c("ShelterservicesFacility",
                  "ShelterprivacyFacility",
-                 "ShelteramenitiesFacility")
+                 "ShelteramenitiesFacility"),
+      proj.opts = opts, 
+      type = 'regex'
     )
   
-  update_bridge_tables(alldata, tblinfo, opts, dbpath)
+  update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Link reference tables
-  varname <- unname(var.mtch['electricwater'])
-  elec.tbl <- "ElectricWater"
-  update_singleresponse_tbl(shel.data, varname, elec.tbl, dbpath)
+  tblinfo <-
+    table_info_matrix(index = "electricwater",
+                      tablename = "ElectricWater",
+                      refcolumn = "elecwater_id",
+                      proj.opts = opts)
   
-  shel.data <-
-    link_db_tables(shel.data, elec.tbl, varname, "elecwater_id", dbpath)
+  update_many_singleresponse_tbls(shel.data, tblinfo, dbpath)
+  shel.data <- unite_main_with_ref_data(shel.data, tblinfo, opts, dbpath)
   
   # Add to the database
   append_to_db(shel.data, "Shelter", dbpath)
@@ -573,22 +596,22 @@ local({
 
 # Economic empowerment/livelihoods
 local({
-  var.index <- 
-    c(
-      field = "oth.srvecon.dscrb",
-      field = "total.economic",
-      bool = "econ.areas",               
-      bool = "econ.reject"               
-    )
+  field <- c("oth.srvecon.dscrb",
+             "total.economic")
+  bool <- c("econ.areas",
+            "econ.reject")
   
+  var.index <- set_variable_indices(bool = bool, field = field)
   econ.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_econ')
   
-  create_multiresponse_group(alldata,
-                             dbpath,
-                             var.rgx[['economic.services']],
-                             "EconServices",
-                             "EconservicesFacility")
+  tblinfo <-
+    table_info_matrix(index = 'economic.services',
+                      tablename = "EconServices",
+                      bridge = "EconservicesFacility",
+                      proj.opts = opts,
+                      type = 'regex')
   
+  update_bridge_tables(alldata, tblinfo, dbpath)
   append_to_db(econ.data, "Economic", dbpath)
 })
 

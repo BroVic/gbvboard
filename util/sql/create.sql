@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS Facility (
   has_phone INTEGER,
   continue_mapping INTEGER,
   respondent_consent INTEGER,
-  org_name TEXT NOT NULL,
+  org_name TEXT,
   started_ops TEXT,
   started_gbv TEXT,
   proj_id INTEGER NOT NULL,

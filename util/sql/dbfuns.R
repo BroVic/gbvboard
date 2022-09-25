@@ -66,8 +66,10 @@ extract_elements <- function(x, name) {
     warning("Only the first element of 'name' was used")
   }
   
-  if (!name %in% names.x)
-    stop("'name' is not a name in 'x'")
+  if (!name %in% names.x) {
+    warning("'name' is not a name in 'x'")
+    return()
+  }
   
   i <- grep(name, names.x)
   
@@ -95,13 +97,15 @@ add_fac_id <- function(x) {
 # we set this to reference other tables
 set_facility_id_col <- function(data, db) {
   stopifnot(is.data.frame(data), file.exists(db))
+  require(dplyr, quietly = TRUE, warn.conflicts = FALSE)
   result <- query_db(db, "SELECT MAX(facility_id) FROM Facility;")
   nrw <- result[1, 1]
   
   if (is.na(nrw))
     nrw <- 0L
   
-  data %>% mutate(facility_id = nrw + seq(nrow(.)))
+  data %>% 
+    mutate(facility_id = nrw + seq(nrow(.)))
 }
 
 
@@ -129,7 +133,6 @@ make_pivot_tabledf <- function(data, var.indices, serv.type = NULL) {
   
   varnames <- add_fac_id(var.indices)
   bools <- extract_elements(var.indices, 'bool')
-  
   filter_alldata(data, serv.type, varnames, bools)
 }
 
@@ -190,9 +193,7 @@ append_to_db <- function(df, tbl, db) {
     dd$id <- NULL
   
   if (!all(dfnames %in% names(dd)))
-    stop(
-      sprintf("The column names in the table and the input data differ")
-    )
+    stop(sprintf("The column names in the table and the input data differ"))
   
   # We bind a few rows of the data we want to input to the
   # previously existing one. If there are any duplications, we
@@ -222,8 +223,44 @@ append_to_db <- function(df, tbl, db) {
 
 get_labels_via_rgx <- function(df, rgx) {
   stopifnot(is.data.frame(df), is.character(rgx))
-  get_var_labels(df, grep(rgx, names(df)))
+  jGBV::get_var_labels(df, grep(rgx, names(df)))
 }
+
+
+
+# Prepares the indices used to extract specific variables
+# from the data. They are named with keys that represent 
+# what kind of field they represent:
+# - fkey: Foreign Keys
+# - bool: Binary (binomial) variables coded as 1/0
+# - field: Regular fields
+set_variable_indices <- function(fkey = NULL, bool = NULL, field = NULL) {
+  args <- list(fkey = fkey, bool = bool, field = field)
+  custom.attr <- 'tag'
+  
+  keys <- purrr::imap(args, function(.x, .y) {
+    if (is.null(.x))
+      return()
+    
+    attr(.x, custom.attr) <- .y
+    .x
+  })
+  
+  spreadName <- function(x, y) {
+    .f <- function(i) {
+      if (!is.null(names(i)))
+        return(i)
+      
+      name <- attr(i, which = custom.attr)
+      setNames(i, rep(name, length(i)))
+    }
+    
+    c(.f(x), .f(y))
+  }
+  
+  Reduce(spreadName, keys, accumulate = FALSE)
+}
+
 
 
 # Creates a matrix that contains, in columnwise fashion, the elements
@@ -232,9 +269,27 @@ get_labels_via_rgx <- function(df, rgx) {
 # - name of the table
 # - indices for retrieving the variable that populates the table
 # - optionally addition column(s) and most commonly the name of new ID columns
-table_info_matrix <- function(proj.opts, index, tablename, ...) {
-  factor <- proj.opts$vars[index]
-  mt <- cbind(factor, tablename, ...)
+table_info_matrix <- function(..., proj.opts, type = c('factor', 'regex')) {
+  if (length(unique(sapply(list(...), length))) != 1L)
+    stop("All elements of `...` must have the same length")
+  
+  type <- match.arg(type)
+  mt <- cbind( ...)
+  
+  .fun <- function(option) {
+    ind <-
+      purrr::map_lgl(as.data.frame(mt), ~ all(.x %in% names(option)))
+    
+    if (sum(ind) > 1L)
+      stop("Malformed object created; there should only be one 'index' column")
+    
+    col <- mt[, ind]
+    option[col]
+  }
+  
+  opt <- with(proj.opts, switch(type, factor = vars, regex = var.regex))
+  mt <- cbind(mt, .fun(opt))
+  colnames(mt) <- sub("^$", type, colnames(mt))
   rownames(mt) <- NULL
   mt
 }
@@ -279,7 +334,7 @@ link_db_tables <- function(x, y, by.x, ref.col = NULL, db = NULL) {
       stop(sQuote(y),
            " is a string (i.e. a table is being read) but 'db' is NULL")
     
-    y <- read_from_db(db, y)
+    y <- jGBV::read_from_db(db, y)
   }
   
   if (is.null(ref.col)) 
@@ -297,14 +352,14 @@ link_db_tables <- function(x, y, by.x, ref.col = NULL, db = NULL) {
 
 # Collectively works on updating bridge tables, which exist for
 # the benefit of the multiple response data
-update_bridge_tables <- function(data, tableinfo, projopts, db) {
+update_bridge_tables <- function(data, tableinfo, db) {
   stopifnot({
     is.data.frame(data)
     is.matrix(tableinfo)
     file.exists(db)
   })
   
-  cols <- tableinfo[, 'factor']
+  cols <- tableinfo[, 'regex']
   tables <- tableinfo[, 'tablename']
   bridges <- tableinfo[, 'bridge']
   
@@ -321,6 +376,9 @@ create_multiresponse_group <-
            rgx,
            label.tbl,
            bridge.tbl = NULL) {
+    require(dplyr, quietly = TRUE, warn.conflicts = FALSE)
+    require(tidyr, quietly = TRUE)
+    
     lbls <- get_labels_via_rgx(data, rgx)
     
     if (is.null(lbls))
@@ -332,7 +390,7 @@ create_multiresponse_group <-
     if (is.null(bridge.tbl))
       return(invisible())
     
-    nlbl.df <- read_from_db(db, label.tbl)
+    nlbl.df <- jGBV::read_from_db(db, label.tbl)
     fac.lbl.df <- select(data, facility_id, matches(rgx))
     names(fac.lbl.df) <- c("facility_id", lbls)
     
@@ -551,8 +609,6 @@ make_boolean <- function(x) {
 
 
 filter_alldata <- function(data, service.col, selected, bools = NULL) {
-  require(rlang, quietly = TRUE)
-  
   if (!is.data.frame(data))
     stop("'data' must be a data frame")
   
@@ -582,6 +638,7 @@ filter_alldata <- function(data, service.col, selected, bools = NULL) {
 
 
 drop_db_table <- function(tblname) {
+  require(RSQLite, quietly = TRUE)
   stmt <- sprintf("DROP TABLE IF EXISTS %s;", tblname)
   
   tryCatch({
@@ -685,8 +742,8 @@ fetch_proj_options <- function(dir, reset = FALSE) {
 
 
 combine_project_data <- function(proj.dir, proj.opts) {
-  require(purrr, warn.conflicts = FALSE)
-  require(jGBV, quietly = TRUE)
+  require(purrr, quietly = TRUE, warn.conflicts = FALSE)
+  require(labelled, quietly = TRUE)
   
   if (!dir.exists(proj.dir))
     stop(sQuote(proj.dir), " does not contain a JHPIEGO GBV project")
@@ -701,6 +758,7 @@ combine_project_data <- function(proj.dir, proj.opts) {
   
   comb <- states |>
     map_dfr(function(s) {
+      
       df <- loadData(database, s) |>
         map_dfc(function(c) {
           
@@ -713,9 +771,9 @@ combine_project_data <- function(proj.dir, proj.opts) {
       
       transform_mismatched(df, proj.opts$proj.name)
     }) |>
-    as_tibble()
+    dplyr::as_tibble()
 
-  one.s <- load_data(database, states[1])
+  one.s <- jGBV::load_data(database, states[1])
   var_label(comb) <- var_label(one.s, unlist = TRUE)
   comb
 }
@@ -859,7 +917,7 @@ apply_project_id <- function(df, db, proj.name, proj.id.name = "proj_id") {
   if (!is.character(proj.name) || !is.character(proj.id.name))
     stop("'proj.name' or 'proj.id.name' must of type 'character'")
   
-  proj <- read_from_db(db, "Projects")
+  proj <- jGBV::read_from_db(db, "Projects")
   proj.id.no <- proj$id[proj$name == proj.name]
   df[[proj.id.name]] <- proj.id.no
   df
