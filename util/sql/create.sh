@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [[ $1 == "help" ]]; then
+  echo "./create.sh [init-only]"
+  exit
+fi
+
 R_EXE="Rscript.exe"
 sql_dir=$(dirname $(realpath $0))
 
@@ -26,7 +31,6 @@ nfwp_dir=$(pwd)
 # $R_EXE -e "library(renv); renv::autoload()"
 
 # Create/update the NFWP database
-echo "Copying the NFWP database"
 nfwp_db=$nfwp_dir/data/nfwp.db 
 # rm $nfwp_db
 # 
@@ -44,14 +48,16 @@ cd $sql_dir
 cp $nfwp_db $app_db
 sqlite3 $app_db < create.sql
 
+if [[ $1 == "init-only" ]]; then
+  echo "Only table creation operation was carried out"
+  exit
+fi
+
 # Populate the tables with the data
 echo "Initializing the NFWP database"
 "$R_EXE" initdb.R $nfwp_dir $app_db
 
-
 cd $proj_dir
-
-
 cd ../NEDC
 # TODO: Check if .Rprof file exists
 nedc_dir=$(pwd)

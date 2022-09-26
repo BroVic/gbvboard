@@ -219,6 +219,7 @@ local({
     table_info_matrix(index = add.indx,
                       tablename = add.tbls,
                       proj.opts = opts)
+  
   tblinfo <- rbind(tblinfo, added.info)
   
   ref.col <-
@@ -246,7 +247,6 @@ local({
   fac.df <- apply_project_id(fac.df, dbpath, opts$proj.name)
   
   # Populate the bridge tables for multiple response data
-  
   rgx.index <-
     c(
       "gbv.types",
@@ -385,7 +385,7 @@ local({
                       refcolumn = c("hftype_id", "healthfees_id"),
                       proj.opts = opts)
   
-  unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
+  h.data <- unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
   
   # Put it all together
   append_to_db(h.data, "Health", dbpath)
@@ -434,7 +434,7 @@ local({
   
   context <- "Legal"
   scrubs <- scrublist(context, tables, new.value)
-  l.data <- unite_main_with_ref_data(l.data, tblinfo2, opts, db, scrubs)
+  l.data <- unite_main_with_ref_data(l.data, tblinfo2, opts, dbpath, scrubs)
   
   # Update the database
   append_to_db(l.data, context, dbpath)
@@ -625,14 +625,14 @@ local({
   if (ans == 2L)
     return()
   
-  for (state in states) {
-    
-    for (category in c("services", "capacity")) {
-      
-      for (table in c("cleaned", "labelled")) {
+  walk(opts$proj.states, function(state) {
+    walk(c("services", "capacity"), function(category) {
+      walk(c("cleaned", "labelled"), function(table) {
+        
         tblname <- sprintf("%s_%s_%s", tolower(state), category, table)
-        drop_db_table(tblname)
-      }
-    }
-  }
+        drop_db_table(tblname, dbpath)
+        
+      })
+    })
+  })
 })

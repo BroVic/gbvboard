@@ -67,7 +67,8 @@ extract_elements <- function(x, name) {
   }
   
   if (!name %in% names.x) {
-    warning("'name' is not a name in 'x'")
+    if (interactive())
+      warning(sQuote(name), " is not a name in ", sQuote(x))
     return()
   }
   
@@ -359,11 +360,15 @@ update_bridge_tables <- function(data, tableinfo, db) {
     file.exists(db)
   })
   
-  cols <- tableinfo[, 'regex']
-  tables <- tableinfo[, 'tablename']
-  bridges <- tableinfo[, 'bridge']
+  len <- nrow(tableinfo)
+  tlist <- sapply(c('regex', 'tablename', 'bridge'),
+                  function(n) unname(tableinfo[, n]),
+                  simplify = FALSE)
+  cols <- tlist$regex
+  tables <- tlist$tablename
+  bridges <- tlist$bridge
   
-  for (i in seq(nrow(tableinfo)))
+  for (i in seq(len))
     create_multiresponse_group(data, db, cols[i], tables[i], bridges[i])
 }
 
@@ -391,10 +396,10 @@ create_multiresponse_group <-
       return(invisible())
     
     nlbl.df <- jGBV::read_from_db(db, label.tbl)
-    fac.lbl.df <- select(data, facility_id, matches(rgx))
-    names(fac.lbl.df) <- c("facility_id", lbls)
+    serv.df <- select(data, facility_id, matches(rgx))
+    names(serv.df) <- c("facility_id", lbls)
     
-    df <- fac.lbl.df %>%
+    df <- serv.df %>%
       pivot_longer(2:last_col()) %>%
       filter(value != 0L) %>%
       left_join(nlbl.df, by = "name") %>%
@@ -637,13 +642,13 @@ filter_alldata <- function(data, service.col, selected, bools = NULL) {
 
 
 
-drop_db_table <- function(tblname) {
+drop_db_table <- function(tblname, db) {
   require(RSQLite, quietly = TRUE)
   stmt <- sprintf("DROP TABLE IF EXISTS %s;", tblname)
   
   tryCatch({
     message("Dropping table ", sQuote(tblname), "... ", appendLF = FALSE)
-    dbcon <- dbConnect(SQLite(), dbpath)
+    dbcon <- dbConnect(SQLite(), db)
     on.exit(dbDisconnect(dbcon))
     r <- dbSendQuery(dbcon, stmt)
     dbClearResult(r)
