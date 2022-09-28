@@ -10,6 +10,7 @@ sql_dir=$(dirname $(realpath $0))
 
 # Move into sub-directory
 cd $sql_dir
+echo "Removing existing database"
 rm -f *.db
 
 cd ../..

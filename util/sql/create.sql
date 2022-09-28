@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS Facility (
   org_name TEXT,
   started_ops TEXT,
   started_gbv TEXT,
-  proj_id INTEGER NOT NULL,
+  project_id INTEGER NOT NULL,
   state_id INTEGER NOT NULL,
   lga_id INTEGER NOT NULL,
   ward TEXT,
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS Facility (
   coord_which TEXT,
   coord_comments TEXT,
   describe_other_srvtype TEXT,
-  FOREIGN KEY (proj_id) REFERENCES Projects(id),
+  FOREIGN KEY (project_id) REFERENCES Projects(id),
   FOREIGN key (state_id) REFERENCES States(id),
   FOREIGN KEY (lga_id) REFERENCES LGAs(id),
   FOREIGN KEY (interviewer_id) REFERENCES Interviewer(id),
@@ -150,10 +150,10 @@ CREATE TABLE IF NOT EXISTS Devices (
 
 CREATE TABLE IF NOT EXISTS Interviewer (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  proj_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
+  project_id INTEGER NOT NULL,
+  name TEXT,
   contact TEXT,
-  FOREIGN KEY (proj_id) REFERENCES Projects(id)
+  FOREIGN KEY (project_id) REFERENCES Project(id)
 );
 
 CREATE TABLE IF NOT EXISTS GBVtypes (

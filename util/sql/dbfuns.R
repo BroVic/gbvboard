@@ -82,37 +82,13 @@ extract_elements <- function(x, name) {
 
 
 
-# Starts off the field names with the 'facility_id'
-add_fac_id <- function(x) {
-  if (!is.character(x))
-    stop("The indices used are character strings")
-  
-  vars <- jGBV::new.varnames[x]
-  c(facility.id = "facility_id", vars)
-}
 
-
-
-
-
-# we set this to reference other tables
-set_facility_id_col <- function(data, db) {
-  stopifnot(is.data.frame(data), file.exists(db))
-  require(dplyr, quietly = TRUE, warn.conflicts = FALSE)
-  result <- query_db(db, "SELECT MAX(facility_id) FROM Facility;")
-  nrw <- result[1, 1]
-  
-  if (is.na(nrw))
-    nrw <- 0L
-  
-  data %>% 
-    mutate(facility_id = nrw + seq(nrow(.)))
-}
-
-
-
-
-make_pivot_tabledf <- function(data, var.indices, serv.type = NULL) {
+make_pivot_tabledf <-
+  function(data,
+           var.indices,
+           serv.type = NULL,
+           id = 'Facility') {
+    
   stopifnot(is.data.frame(data))
   nvn <- jGBV::new.varnames
   
@@ -132,15 +108,99 @@ make_pivot_tabledf <- function(data, var.indices, serv.type = NULL) {
       ))
   }
   
-  varnames <- add_fac_id(var.indices)
+  varnames <- .add_id_name(var.indices, id)
   bools <- extract_elements(var.indices, 'bool')
-  filter_alldata(data, serv.type, varnames, bools)
+  .filter_alldata(data, serv.type, varnames, bools)
 }
 
 
 
+
+
+# we set this to reference other tables
+set_id_col <- function(data, db, id) {
+  stopifnot(is.data.frame(data), file.exists(db))
+  require(dplyr, quietly = TRUE, warn.conflicts = FALSE)
+  
+  id.str <- .mk_id(id, "_")
+  qry <- sprintf("SELECT MAX(%s) FROM %s;", id.str, id)
+  result <- query_db(db, qry)
+  nrw <- result[1, 1]
+  
+  if (is.na(nrw))
+    nrw <- 0L
+  
+  data %>% 
+    mutate(facility_id = nrw + seq(nrow(.)))
+}
+
+
+
+
+# Starts off the field names with the 'facility_id'
+.add_id_name <- function(x, id) {
+  if (!is.character(x))
+    stop("The indices used are character strings")
+  
+  if (is.null(id))
+    y <- id
+  else {
+    y <- .mk_id(id, "_")
+    names(y) <- .mk_id(id, ".")
+  }
+  
+  vars <- jGBV::new.varnames[x]
+  c(y, vars)
+}
+
+
+
+# Creates a string for an id_column
+.mk_id <- function(id, sep) {
+  stopifnot({
+    is.character(id)
+    is.character(sep)
+  })
+  
+  paste(tolower(id), 'id', sep = sep)
+}
+
+
+
+
+.filter_alldata <- function(data, service.col, selected, bools = NULL) {
+  require(dplyr, quietly = TRUE, warn.conflicts = FALSE)
+  if (!is.data.frame(data))
+    stop("'data' must be a data frame")
+  
+  if (!is.null(service.col)) {
+    filtered.rows <- data[[service.col]] == 1
+    data <- data[filtered.rows,]
+  }
+  
+  # If we don't unname `selected` here, it's names
+  # are passed on to the selected columns, thereby
+  # distorting the original names of the structure.
+  usel <- unname(selected)
+  data <- select(data, all_of(usel))
+  
+  if (is.null(bools))
+    return(data)
+  
+  # The boolean-designate columns are fished out using
+  # the names of the monitoring variable jGBV::new.varnames,
+  # which at this pointed is in a shorter version, the object
+  # `selected`.
+  ubools <- unname(selected[bools])
+  mutate(data, across(all_of(ubools), make_boolean))
+}
+
+
+
+
+
 # Appends data to already created database tables
-append_to_db <- function(df, tbl, db) {
+append_to_dbtable <- function(df, tbl, db) {
   require(RSQLite, quietly = TRUE)
   
   tryCatch({
@@ -312,19 +372,38 @@ unite_main_with_ref_data <- function(data, tableinfo, proj.opts, db, ...) {
   ref.col <- tableinfo[, 'refcolumn']
   
   if (proj.opts$proj.name == "NFWP") {
+    dots <- list(...)
     
-    for (i in seq_along(y.tables))
-      data <- link_db_tables(data, y.tables[i], by.x[i], ref.col[i], db)
+    drop <- NULL
+    
+    if (all('drop' %in% names(dots)))
+      drop <- dots$drop
+    
+    for (i in seq_along(y.tables)) {
+      data <-
+        link_db_tables(data,
+                       y.tables[i],
+                       by.x[i],
+                       ref.col[i],
+                       db,
+                       drop = drop)
+    }
     
     return(data)
   }
   
-  update_linked_tables(data, y.tables, by.x, ref.col, db, ...)
+  update_linked_tables(data, y.tables, by.x, ref.col, db)
 }
 
 
 
-link_db_tables <- function(x, y, by.x, ref.col = NULL, db = NULL) {
+link_db_tables <-
+  function(x,
+           y,
+           by.x,
+           ref.col = NULL,
+           db = NULL,
+           drop = NULL) {
   
   if (is.character(y)) {
     
@@ -341,8 +420,13 @@ link_db_tables <- function(x, y, by.x, ref.col = NULL, db = NULL) {
   if (is.null(ref.col)) 
     ref.col <- by.x
   
-  ndf <- merge(x, y, by.x = by.x, by.y = 'name', all = TRUE)
+  if (!is.null(drop))
+    y[, drop] <- NULL
+  
+  ndf <- merge(x, y, by.x = by.x, by.y = 'name', all = TRUE, all.y = FALSE)
   ndf[[by.x]] <- NULL
+  
+  
   names(ndf)[match("id", names(ndf))] <- ref.col
   ndf
 }
@@ -390,7 +474,7 @@ create_multiresponse_group <-
       stop("There no labels for this group")
     
     lbl.df <- data.frame(name = lbls)
-    print(append_to_db(lbl.df, label.tbl, db))
+    print(append_to_dbtable(lbl.df, label.tbl, db))
     
     if (is.null(bridge.tbl))
       return(invisible())
@@ -406,7 +490,7 @@ create_multiresponse_group <-
       select(-c(name, value)) %>%
       rename(opt_id = id)
     
-    append_to_db(df, bridge.tbl, db)
+    append_to_dbtable(df, bridge.tbl, db)
   }
 
 
@@ -446,7 +530,7 @@ update_singleresponse_tbl <- function(data, col, tblname, db) {
     as.character()
   
   df <- data.frame(name = vals)
-  append_to_db(df, tblname, db)
+  append_to_dbtable(df, tblname, db)
 }
 
 
@@ -533,7 +617,7 @@ update_linked_tables <-
       tryCatch({
         message("Updating the table ", sQuote(tblname), "... ",
                 appendLF = FALSE)
-        append_to_db(data.frame(name = insert), tblname, db)
+        append_to_dbtable(data.frame(name = insert), tblname, db)
         message("Done")
       }, 
       error = function(e) {
@@ -607,36 +691,6 @@ update_linked_tables <-
 make_boolean <- function(x) {
   stopifnot(is.character(x))
   ifelse(x == "Yes", 1L, 0L)
-}
-
-
-
-
-
-filter_alldata <- function(data, service.col, selected, bools = NULL) {
-  if (!is.data.frame(data))
-    stop("'data' must be a data frame")
-  
-  if (!is.null(service.col)) {
-    filtered.rows <- data[[service.col]] == 1
-    data <- data[filtered.rows,]
-  }
-  
-  # If we don't unname `selected` here, it's names
-  # are passed on to the selected columns, thereby
-  # distorting the original names of the structure.
-  usel <- unname(selected)
-  data <- select(data, all_of(usel))
-  
-  if (is.null(bools))
-    return(data)
-  
-  # The boolean-designate columns are fished out using
-  # the names of the monitoring variable jGBV::new.varnames,
-  # which at this pointed is in a shorter version, the object
-  # `selected`.
-  ubools <- unname(selected[bools])
-  mutate(data, across(all_of(ubools), make_boolean))
 }
 
 
@@ -912,7 +966,7 @@ scrublist <- function(context = NULL, tables = character(), insert = NULL) {
 
 # Gives a data frame project IDs which are to be used in the 
 # database table
-apply_project_id <- function(df, db, proj.name, proj.id.name = "proj_id") {
+apply_project_id <- function(df, db, proj.name, proj.id.name = "project_id") {
   if (!is.data.frame(df))
     stop("df' must be a data frame")
   

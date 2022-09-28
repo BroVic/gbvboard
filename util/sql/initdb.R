@@ -39,33 +39,54 @@ alldata <- combine_project_data(dir, opts)
 # to set a main ID column which represents the
 # individual facilities.
 dbpath <- here("app/data.db")
-alldata <- set_facility_id_col(alldata, dbpath)
+alldata <- set_id_col(alldata, dbpath, "facility")
 
 # Table operations ----
 local({
   tblname <- "Projects"
   proj <- data.frame(name = opts$proj.name, year = opts$proj.year)
-  append_to_db(proj, tbl = tblname, dbpath)
+  append_to_dbtable(proj, tbl = tblname, dbpath)
 })
 
+
 local({
-  tables <- c("States", "LGAs", "Devices")
-  variables <- opts$vars[c("state", "lga", "device.id")]
-  
-  purrr::walk2(variables,
-               tables,
-               ~ update_singleresponse_tbl(alldata, .x, .y, dbpath))
+  tblinfo <-
+    table_info_matrix(
+      index = c("state", "lga", "device.id"),
+      tablename = c("States", "LGAs", "Devices"),
+      proj.opts = opts
+    )
+  update_many_singleresponse_tbls(alldata, tblinfo, dbpath)
 })
 
 # The Interviewers
 local({
-  ivars <- opts$vars[c('interviewer', 'interviewer.contact')]
-  interviewer <- alldata[, ivars]
-  interviewer.name <- interviewer[[ivars[1]]]
-  interviewer <- interviewer[!duplicated(interviewer.name), ]
-  names(interviewer) <- c("name", "contact")
-  interviewer <- apply_project_id(interviewer, dbpath, opts$proj.name)
-  append_to_db(interviewer, "Interviewer", dbpath)
+  var.index <-
+    set_variable_indices(fkey = 'proj.name',
+                         field = c('interviewer', 'interviewer.contact'))
+  
+  cols <- opts$vars[c('interviewer', 'interviewer.contact')]
+  ind <- !duplicated(alldata[, cols[1]])
+  interv.data <- alldata[ind, ]
+  interv.data <- make_pivot_tabledf(interv.data, var.index, id = NULL)
+  
+  tblinfo <- 
+    table_info_matrix(
+      index = 'proj.name',
+      tablename = "Projects",
+      refcolumn = 'project_id',
+      proj.opts = opts
+    )
+  
+  interv.data <-
+    unite_main_with_ref_data(interv.data,
+                             tblinfo,
+                             opts,
+                             dbpath,
+                             drop = "year")
+  
+  names(interv.data) <- c("name", "contact", "project_id")
+  append_to_dbtable(interv.data, "Interviewer", dbpath)
 })
 
 # Facility-specific data ----
@@ -284,22 +305,15 @@ local({
   update_bridge_tables(alldata, tblinfo, dbpath)
   
   # Merge reference tables with main one via their respective PK IDs
-  tbls <-
-    lapply(c("Interviewer", "Projects"), function(x)
-      jGBV::read_from_db(dbpath, x))
-  all.interviewers <- tbls[[1]]
-  proj <- tbls[[2]]
-  rm(tbls)
-  proj.id <- proj$id[proj$name == opts$proj.name]
-  proj.interviewers <- subset(all.interviewers, proj_id == proj.id)
-  proj.interviewers[c('proj_id', "contact")] <- NULL 
+  interviewer.data <- jGBV::read_from_db(dbpath, "Interviewer")
   
   fac.df <-
     link_db_tables(
       fac.df, 
-      proj.interviewers, 
+      interviewer.data,
       "interviewer_name",
-      "interviewer_id"
+      "interviewer_id",
+      drop = c('project_id', 'contact')
     )
   
   # For those variables for "referrals to" i.e. always/sometimes/never
@@ -309,7 +323,7 @@ local({
       link_db_tables(fac.df, "ReferralToOptions", i, refname, dbpath)
   }
   
-  append_to_db(fac.df, "Facility", dbpath)
+  append_to_dbtable(fac.df, "Facility", dbpath)
 })
 
 
@@ -388,7 +402,7 @@ local({
   h.data <- unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
   
   # Put it all together
-  append_to_db(h.data, "Health", dbpath)
+  append_to_dbtable(h.data, "Health", dbpath)
 })
 
 
@@ -437,7 +451,7 @@ local({
   l.data <- unite_main_with_ref_data(l.data, tblinfo2, opts, dbpath, scrubs)
   
   # Update the database
-  append_to_db(l.data, context, dbpath)
+  append_to_dbtable(l.data, context, dbpath)
 })
 
 
@@ -483,7 +497,7 @@ local({
   psy.data <- unite_main_with_ref_data(psy.data, tblinfo, opts, dbpath)
   
   # Finalize for psychosocial services
-  append_to_db(psy.data, "Psychosocial", dbpath)
+  append_to_dbtable(psy.data, "Psychosocial", dbpath)
 })
 
 
@@ -538,7 +552,7 @@ local({
     )
   pol.data <- unite_main_with_ref_data(pol.data, tblinfo, opts, dbpath)
   
-  append_to_db(pol.data, "Police", dbpath)
+  append_to_dbtable(pol.data, "Police", dbpath)
 })
 
 
@@ -589,7 +603,7 @@ local({
   shel.data <- unite_main_with_ref_data(shel.data, tblinfo, opts, dbpath)
   
   # Add to the database
-  append_to_db(shel.data, "Shelter", dbpath)
+  append_to_dbtable(shel.data, "Shelter", dbpath)
 })
 
 
@@ -612,7 +626,7 @@ local({
                       type = 'regex')
   
   update_bridge_tables(alldata, tblinfo, dbpath)
-  append_to_db(econ.data, "Economic", dbpath)
+  append_to_dbtable(econ.data, "Economic", dbpath)
 })
 
 # Remove the original tables
