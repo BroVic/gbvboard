@@ -10,6 +10,7 @@
 # Dependencies ----
 suppressPackageStartupMessages(library(here))
 source(here("util/sql/dbfuns.R"))
+source(here('util/sql/dbflds.R'))
 
 # Project Data ----
 ## Fetch inputs
@@ -40,6 +41,7 @@ alldata <- combine_project_data(dir, opts)
 # individual facilities.
 dbpath <- here("app/data.db")
 alldata <- set_id_col(alldata, dbpath, "facility")
+data.selectors <- get_selecion_args()
 
 # Table operations ----
 local({
@@ -61,9 +63,8 @@ local({
 
 # The Interviewers
 local({
-  var.index <-
-    set_variable_indices(fkey = 'proj.name',
-                         field = c('interviewer', 'interviewer.contact'))
+  context <- "Interviewer"
+  var.index <- get_var_index(data.selectors, context)
   
   cols <- opts$vars[c('interviewer', 'interviewer.contact')]
   ind <- !duplicated(alldata[, cols[1]])
@@ -86,108 +87,13 @@ local({
                              drop = "year")
   
   names(interv.data) <- c("name", "contact", "project_id")
-  append_to_dbtable(interv.data, "Interviewer", dbpath)
+  append_to_dbtable(interv.data, context, dbpath)
 })
 
 # Facility-specific data ----
 local({
-  fkey <- c(
-    "state",
-    "lga",
-    "interviewer",
-    "device.id",
-    "age",
-    "showed.docs",
-    "org.type",
-    "how.data",
-    "private.ques",
-    "computer.secured",
-    "contact.authority",
-    "coc.signed",
-    "refto.health",
-    "refto.psych",
-    "refto.police",
-    "refto.legal",
-    "refto.shelt",
-    "refto.econ",
-    "refto.other",
-    "update.refdir",
-    "choose.treatment"
-  )
-  
-  bool <- c(
-    "uses.docs",
-    "child.docs",
-    "standard.forms",
-    "data.is.stored",
-    "priv",
-    "priv.room",
-    "serve.disabled",
-    "disabled.special",
-    "coc.copies",
-    "coc.confidentiality",
-    "coc.equity",
-    "has.focalperson",
-    "has.gbv.trained",
-    "has.refdir",
-    "choose.referral",
-    "coordination"
-  )
-  
-  field <- c(
-    "start",
-    "end",
-    "today",
-    "has.office",
-    "has.phone",
-    "continue",
-    "consent",
-    "orgname",
-    "opstart",
-    "gbvstart",
-    "ward",
-    "address",
-    "phone",
-    "email",
-    "title",
-    "info",
-    "gps.long",
-    "gps.lat",
-    "gps.alt",
-    "gps.prec",
-    "oth.org.type",
-    "open.247",
-    "open.time",
-    "close.time",
-    "oth.gbv.dscrb",
-    "staffname",
-    "oth.fund.dscrb",
-    "govt.spec",
-    "fulltime.staff",
-    "partime.staff",
-    "female.staff",
-    "doc.photo",
-    "oth.docs.dscrb",
-    "process.nodoc",
-    "why.contact",
-    "contact.case",
-    "contact.authtype",
-    "details.miss.equip",
-    "oth.disabl.dscrb",
-    "focalperson.contact",
-    "num.gbv.trained",
-    "who.gbv.trained",
-    "which.gbv.trained",
-    "refdir.pic",
-    "oth.refto.dscrb",
-    "gbvcase.contact",
-    "why.nochoose.ref",
-    "which.coord",
-    "comment.coord",
-    "service.othersdetail"
-  )
-  
-  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
+  context <- "Facility"
+  var.index <- get_var_index(data.selectors, context)
   fac.df <- make_pivot_tabledf(alldata, var.index)
   
   tables <-
@@ -323,40 +229,14 @@ local({
       link_db_tables(fac.df, "ReferralToOptions", i, refname, dbpath)
   }
   
-  append_to_dbtable(fac.df, "Facility", dbpath)
+  append_to_dbtable(fac.df, context, dbpath)
 })
 
 
 # Health services
 local({
-  
-  fkey <- c("hf.type", "health.paid")
-  bool <- c("has.pep", "has.contracep", "access.srv", "forms.yes")
-  
-  field <- c(
-    "hf.type.others",
-    "oth.srvhealth.dscrb",
-    "total.health",
-    "has.no.pep",
-    "has.no.contracep",
-    "healthfee.clin",
-    "healthfee.inj",
-    "healthfee.pep",
-    "healthfee.contra",
-    "healthfee.hiv",
-    "healthfee.sti",
-    "healthfee.foren",
-    "healthfee.psych",
-    "healthfee.case",
-    "healthfee.basic",
-    "healthfee.other",
-    "comment.elem",
-    "comment.suppl",
-    "oth.hlthtrain.dscrb",
-    "qual.staff"
-  )
-  
-  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
+  context <- "Health"
+  var.index <- get_var_index(data.selectors, context)
   h.data <- make_pivot_tabledf(alldata, var.index, "srvtype_health")
   
   ## Bridge tables
@@ -402,29 +282,14 @@ local({
   h.data <- unite_main_with_ref_data(h.data, tblinfo, opts, dbpath)
   
   # Put it all together
-  append_to_dbtable(h.data, "Health", dbpath)
+  append_to_dbtable(h.data, context, dbpath)
 })
 
 
 # Legal Aid Services
 local({
-  bool <- "support.for.court" 
-  fkey <- c("legal.paid", "no.resources1")
-  field <- c(
-    "oth.srvleg.dscrb",
-    "total.legal",
-    "legal.access",
-    "legalfee.consult",
-    "legalfee.rep",
-    "legalfee.court",
-    "legalfee.med",
-    "legalfee.secur",
-    "legalfee.counsel",
-    "legalfee.other",
-    "no.resources2"
-  )
-  
-  var.index <- set_variable_indices(fkey = fkey, bool = bool, field = field)
+  context <- "Legal"
+  var.index <- get_var_index(data.selectors, context)
   l.data <- make_pivot_tabledf(alldata, var.index, serv.type = "srvtype_legal")
   
   # Bridge table for legal aid data
@@ -445,8 +310,6 @@ local({
                       proj.opts = opts)
  
   update_many_singleresponse_tbls(l.data, tblinfo2, dbpath)
-  
-  context <- "Legal"
   scrubs <- scrublist(context, tables, new.value)
   l.data <- unite_main_with_ref_data(l.data, tblinfo2, opts, dbpath, scrubs)
   
@@ -458,21 +321,8 @@ local({
 
 # Psychosocial support
 local({
-  fkey <- "psych.paid"
-  field <- c(
-    "oth.srvpsy.dscrb",
-    "total.psychosocial",
-    "psych.access",
-    "psychfee.counsel",
-    "psychfee.case",
-    "psychfee.therapy",
-    "psychfee.safety",
-    "psychfee.other",
-    "oth.psychtrain.dscrb",
-    "qualstaff.id"
-  )
-  
-  var.index <- set_variable_indices(fkey = fkey, field = field)
+  context <- "Psychosocial"
+  var.index <- get_var_index(data.selectors, context)
   psy.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_psych')
   
   # Bridge tables
@@ -497,35 +347,14 @@ local({
   psy.data <- unite_main_with_ref_data(psy.data, tblinfo, opts, dbpath)
   
   # Finalize for psychosocial services
-  append_to_dbtable(psy.data, "Psychosocial", dbpath)
+  append_to_dbtable(psy.data, context, dbpath)
 })
 
 
 # Security/Police
 local({
-  fkey <-  "police.fees"
-  bool <- c("gbv.police",
-            "refer.otherpolice",
-            "police.followup")
-  field <- c(
-    "who.gbvpolice",
-    "oth.srvpol.dscrb",
-    "trainedpolice.id",
-    "total.police.rape",
-    "total.police.ipv",
-    "total.police.csa",
-    "total.police.fgm",
-    "total.police.oth",
-    "oth.polnum.dscrb",
-    "police.access",
-    "policefee.case",
-    "policefee.safety",
-    "policefee.other",
-    "oth.policeresrc.dscrb",
-    "police.confidential"
-  )
-  
-  var.index <- set_variable_indices(fkey, bool, field)
+  context <- "Police"
+  var.index <- get_var_index(data.selectors, context)
   pol.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_police')
   
   # Make bridge tables
@@ -552,7 +381,7 @@ local({
     )
   pol.data <- unite_main_with_ref_data(pol.data, tblinfo, opts, dbpath)
   
-  append_to_dbtable(pol.data, "Police", dbpath)
+  append_to_dbtable(pol.data, context, dbpath)
 })
 
 
@@ -560,22 +389,8 @@ local({
 
 # Temporary shelter
 local({
-  fkey <-  "electricwater"
-  field <- c(
-    "health.srvshelt.dscrb",
-    "oth.srvshelt.dscrb",
-    "oth.sheltpriv.dscrb",
-    "oth.sheltamen.dscrb",
-    "total.shelter.f",
-    "total.shelter.m"
-  )
-  bool <- c(
-    "shelter.famfriendly",
-    "shelter.kidfriendly",
-    "shelter.support",
-    "shelter.new.support"
-  )
-  var.index <- set_variable_indices(fkey, bool, field)
+  context <- "Shelter"
+  var.index <- get_var_index(data.selectors, context)
   shel.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_shelt')
   
   # Bridge tables
@@ -603,19 +418,13 @@ local({
   shel.data <- unite_main_with_ref_data(shel.data, tblinfo, opts, dbpath)
   
   # Add to the database
-  append_to_dbtable(shel.data, "Shelter", dbpath)
+  append_to_dbtable(shel.data, context, dbpath)
 })
-
-
 
 # Economic empowerment/livelihoods
 local({
-  field <- c("oth.srvecon.dscrb",
-             "total.economic")
-  bool <- c("econ.areas",
-            "econ.reject")
-  
-  var.index <- set_variable_indices(bool = bool, field = field)
+  context <- "Economic"
+  var.index <- get_var_index(data.selectors, context)
   econ.data <- make_pivot_tabledf(alldata, var.index, 'srvtype_econ')
   
   tblinfo <-
@@ -626,7 +435,7 @@ local({
                       type = 'regex')
   
   update_bridge_tables(alldata, tblinfo, dbpath)
-  append_to_dbtable(econ.data, "Economic", dbpath)
+  append_to_dbtable(econ.data, context, dbpath)
 })
 
 # Remove the original tables

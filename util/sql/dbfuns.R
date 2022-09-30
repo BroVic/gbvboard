@@ -289,38 +289,18 @@ get_labels_via_rgx <- function(df, rgx) {
 
 
 
-# Prepares the indices used to extract specific variables
-# from the data. They are named with keys that represent 
-# what kind of field they represent:
-# - fkey: Foreign Keys
-# - bool: Binary (binomial) variables coded as 1/0
-# - field: Regular fields
-set_variable_indices <- function(fkey = NULL, bool = NULL, field = NULL) {
-  args <- list(fkey = fkey, bool = bool, field = field)
-  custom.attr <- 'tag'
+# Retrieve the variable index object that is used to detect the variable
+# names for be used in populating the database tables
+get_var_index <- function(data, group) {
+  stopifnot(is.data.frame(data), is.character(group))
   
-  keys <- purrr::imap(args, function(.x, .y) {
-    if (is.null(.x))
-      return()
-    
-    attr(.x, custom.attr) <- .y
-    .x
-  })
+  if (length(group) != 1L)
+    stop("'group' must be a string")
   
-  spreadName <- function(x, y) {
-    .f <- function(i) {
-      if (!is.null(names(i)))
-        return(i)
-      
-      name <- attr(i, which = custom.attr)
-      setNames(i, rep(name, length(i)))
-    }
-    
-    c(.f(x), .f(y))
-  }
-  
-  Reduce(spreadName, keys, accumulate = FALSE)
+  vec <- data$var.index[data$table == group][[1]]
+  vec[vec != ""]
 }
+
 
 
 
